@@ -161,11 +161,17 @@ jobs:
                 const p = await b.newPage();
                 const errs = [];
                 p.on("pageerror", e => errs.push(String(e)));
-                try {
-                  await p.goto(process.env.U, { waitUntil: "domcontentloaded", timeout: 30000 });
-                } catch (e) {
-                  console.error("PW_INFRA_NAV", String(e)); await b.close(); process.exit(3);
+                let nav = false;
+                for (let i = 1; i <= 3 && !nav; i++) {
+                  try {
+                    await p.goto(process.env.U, { waitUntil: "domcontentloaded", timeout: 30000 });
+                    nav = true;
+                  } catch (e) {
+                    console.error("PW_NAV_RETRY " + i + "/3", String(e));
+                    if (i < 3) await new Promise(r => setTimeout(r, 2000 * i));
+                  }
                 }
+                if (!nav) { console.error("PW_INFRA_NAV", "goto échoué après 3 tentatives"); await b.close(); process.exit(3); }
                 let mounted = false;
                 try {
                   await p.waitForFunction(() => {
