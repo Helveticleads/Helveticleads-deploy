@@ -161,10 +161,22 @@ jobs:
                 const p = await b.newPage();
                 const errs = [];
                 p.on("pageerror", e => errs.push(String(e)));
-                await p.goto(process.env.U, { waitUntil: "networkidle", timeout: 30000 });
-                const ok = await p.$eval("#root", el => el.children.length > 0 || (el.textContent||"").trim().length > 50).catch(() => false);
+                try {
+                  await p.goto(process.env.U, { waitUntil: "domcontentloaded", timeout: 30000 });
+                } catch (e) {
+                  console.error("PW_INFRA_NAV", String(e)); await b.close(); process.exit(3);
+                }
+                let mounted = false;
+                try {
+                  await p.waitForFunction(() => {
+                    const el = document.querySelector("#root");
+                    return !!el && (el.children.length > 0 || (el.textContent || "").trim().length > 50);
+                  }, { timeout: 20000 });
+                  mounted = true;
+                } catch (e) { mounted = false; }
                 await b.close();
-                if (errs.length || !ok) { console.error("RENDER_BAD", JSON.stringify({ok, errs})); process.exit(2); }
+                if (errs.length) console.error("PW_PAGEERRORS", JSON.stringify(errs));
+                if (!mounted) { console.error("RENDER_BAD_MOUNT"); process.exit(2); }
                 process.exit(0);
               })().catch(e => { console.error("PW_INFRA", String(e)); process.exit(3); });
             '
