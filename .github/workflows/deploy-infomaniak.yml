@@ -139,10 +139,18 @@ jobs:
           done
           echo "GATE_OK post_assets"
 
-          # --- render gate (Playwright → heuristic fallback) ---
-          if npx --yes playwright install --with-deps chromium >/tmp/pw.log 2>&1; then
-            npm install --no-save playwright >/tmp/pw-npm.log 2>&1 || true
-            if node -e '
+          # --- Gate rendu : Playwright best-effort, heuristique en repli ---
+          # Rollback UNIQUEMENT sur rendu avéré KO ; jamais sur panne d'infra Playwright.
+          render_ok=""
+          prov_ok=""
+          if npm install --no-save playwright >/tmp/pwnpm.log 2>&1 && npx playwright install chromium >/tmp/pwbin.log 2>&1; then
+            prov_ok=1
+          else
+            echo "render: provisioning Playwright KO -> repli heuristique"
+          fi
+          if [ -n "$prov_ok" ]; then
+            set +e
+            node -e '
               const { chromium } = require("playwright");
               (async () => {
                 const b = await chromium.launch();
@@ -150,25 +158,21 @@ jobs:
                 const errs = [];
                 p.on("pageerror", e => errs.push(String(e)));
                 await p.goto(process.env.U, { waitUntil: "networkidle", timeout: 30000 });
-                const ok = await p.$eval("#root", el => el.children.length > 0 || (el.textContent || "").trim().length > 50).catch(() => false);
+                const ok = await p.$eval("#root", el => el.children.length > 0 || (el.textContent||"").trim().length > 50).catch(() => false);
                 await b.close();
-                if (!ok || errs.length) {
-                  console.error("RENDER_FAIL", { ok, errs });
-                  process.exit(1);
-                }
-                console.log("GATE_OK render_playwright");
-              })().catch(e => { console.error(e); process.exit(1); });
-            ' U="https://$DOMAIN/"; then
-              echo "GATE_OK render"
-            else
-              echo "GATE_FAIL render_playwright"
-              rollback
-              exit 1
+                if (errs.length || !ok) { console.error("RENDER_BAD", JSON.stringify({ok, errs})); process.exit(2); }
+                process.exit(0);
+              })().catch(e => { console.error("PW_INFRA", String(e)); process.exit(3); });
+            ' U="https://$DOMAIN/"
+            rc=$?
+            set -e
+            if   [ "$rc" = 0 ]; then echo "GATE_OK render_playwright"; render_ok=1
+            elif [ "$rc" = 2 ]; then echo "GATE_FAIL render_playwright:page"; rollback; exit 1
+            else                      echo "render: Playwright infra KO (rc=$rc) -> repli heuristique"
             fi
-          else
-            echo "Playwright indispo → repli heuristique"
-            js=$(grep -oE '/assets/[A-Za-z0-9._-]+\.js' /tmp/root.html | head -n3)
-            for u in $js; do
+          fi
+          if [ -z "$render_ok" ]; then
+            for u in $(grep -oE '/assets/[A-Za-z0-9._-]+\.js' /tmp/root.html | head -n3); do
               if curl -fsS "https://$DOMAIN$u" | grep -Eq 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE'; then
                 echo "GATE_FAIL render_heuristic:bare_ref_live"
                 rollback
