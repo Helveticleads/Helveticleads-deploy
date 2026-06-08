@@ -19,6 +19,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      ARTIFACT: ${{ inputs.artifact }}
+      DOMAIN: ${{ inputs.domain }}
+      HOST: ${{ inputs.host }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +47,31 @@ jobs:
           NODE_ENV: production
         run: pnpm --filter ${{ inputs.artifact }} run build
 
+      - name: Gates build-time
+        run: |
+          set -euo pipefail
+          PKG_DIR="$(pnpm --filter "$ARTIFACT" exec node -e 'process.stdout.write(process.cwd())')"
+          SRC="$PKG_DIR/dist/public"
+          echo "SRC=$SRC"
+          echo "PKG_DIR=$PKG_DIR" >> "$GITHUB_ENV"
+          echo "SRC=$SRC" >> "$GITHUB_ENV"
+
+          # 1) index.html present
+          test -f "$SRC/index.html" || { echo "GATE_FAIL build:index_html_absent"; exit 1; }
+
+          # 2) asset coherence: each /assets/*.js|css referenced exists locally
+          for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' "$SRC/index.html" | sort -u); do
+            test -f "$SRC$r" || { echo "GATE_FAIL build:asset_manquant:$r"; exit 1; }
+          done
+
+          # 3) anti bare-ref (SITE_CONFIG page blanche) — FORBIDDEN_BARE_REFS verbatim
+          if grep -REl 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE' "$SRC/assets/" 2>/dev/null; then
+            echo "GATE_FAIL build:reference_nue_SITE_CONFIG"
+            exit 1
+          fi
+
+          echo "GATE_OK build_local"
+
       - name: Cle SSH de deploiement
         run: |
           mkdir -p ~/.ssh
@@ -50,22 +79,113 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H ${{ inputs.host }} >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Deploiement atomique
+      - name: Deploiement atomique gaté
         run: |
           set -euo pipefail
           TS=$(date +%Y%m%d-%H%M%S)
-          BASE="/var/www/${{ inputs.domain }}"
-          SRC=$(find . -type d -path '*/dist/public' | head -n1)
-          test -n "$SRC" || { echo "ERREUR: dist/public introuvable apres build"; exit 1; }
+          BASE="/var/www/$DOMAIN"
+          SSH_OPTS=(-i ~/.ssh/id_ed25519)
+          SSH_CMD=(ssh "${SSH_OPTS[@]}" "deploy@$HOST")
+          RSYNC_SSH="ssh -i ~/.ssh/id_ed25519"
+
+          retry() {
+            local n=0 max=4
+            until "$@"; do
+              n=$((n + 1))
+              [ "$n" -ge "$max" ] && return 1
+              sleep $(( (2**n) + (RANDOM % 4) ))
+              echo "retry $n/$max…"
+            done
+          }
+
+          rollback() {
+            if [ -n "${PREV:-}" ]; then
+              "${SSH_CMD[@]}" "ln -sfn '$PREV' '$BASE/current'"
+              echo "ROLLBACK→$PREV"
+            else
+              echo "ROLLBACK_SKIP: PREV vide"
+            fi
+          }
+
           echo "Source build : $SRC"
 
-          rsync -avz --delete \
-            -e "ssh -i ~/.ssh/id_ed25519" \
-            "$SRC/" \
-            deploy@${{ inputs.host }}:"$BASE/releases/$TS/"
+          PREV="$("${SSH_CMD[@]}" "readlink -f '$BASE/current'" 2>/dev/null || true)"
+          echo "PREV=$PREV"
 
-          ssh -i ~/.ssh/id_ed25519 deploy@${{ inputs.host }} "
-            ln -sfn '$BASE/releases/$TS' '$BASE/current' &&
-            ls -1dt $BASE/releases/*/ | tail -n +6 | xargs -r rm -rf
-          "
-          echo "Deploye : ${{ inputs.domain }} -> release $TS"
+          retry rsync -avz --delete \
+            -e "$RSYNC_SSH" \
+            "$SRC/" \
+            "deploy@$HOST:$BASE/releases/$TS/"
+
+          retry "${SSH_CMD[@]}" "ln -sfn '$BASE/releases/$TS' '$BASE/current'"
+          echo "GATE_OK symlink"
+
+          # --- post-bascule gates ---
+          code=$(curl -fsS -o /tmp/root.html -w '%{http_code}' "https://$DOMAIN/" || echo 000)
+          if ! { [ "$code" = "200" ] && grep -q 'id="root"' /tmp/root.html; }; then
+            echo "GATE_FAIL post:http_root:$code"
+            rollback
+            exit 1
+          fi
+          echo "GATE_OK post_http_root"
+
+          for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' /tmp/root.html | sort -u); do
+            ac=$(curl -fsS -o /dev/null -w '%{http_code}' "https://$DOMAIN$r" || echo 000)
+            if [ "$ac" != "200" ]; then
+              echo "GATE_FAIL post:asset:$r:$ac"
+              rollback
+              exit 1
+            fi
+          done
+          echo "GATE_OK post_assets"
+
+          # --- render gate (Playwright → heuristic fallback) ---
+          if npx --yes playwright install --with-deps chromium >/tmp/pw.log 2>&1; then
+            npm install --no-save playwright >/tmp/pw-npm.log 2>&1 || true
+            if node -e '
+              const { chromium } = require("playwright");
+              (async () => {
+                const b = await chromium.launch();
+                const p = await b.newPage();
+                const errs = [];
+                p.on("pageerror", e => errs.push(String(e)));
+                await p.goto(process.env.U, { waitUntil: "networkidle", timeout: 30000 });
+                const ok = await p.$eval("#root", el => el.children.length > 0 || (el.textContent || "").trim().length > 50).catch(() => false);
+                await b.close();
+                if (!ok || errs.length) {
+                  console.error("RENDER_FAIL", { ok, errs });
+                  process.exit(1);
+                }
+                console.log("GATE_OK render_playwright");
+              })().catch(e => { console.error(e); process.exit(1); });
+            ' U="https://$DOMAIN/"; then
+              echo "GATE_OK render"
+            else
+              echo "GATE_FAIL render_playwright"
+              rollback
+              exit 1
+            fi
+          else
+            echo "Playwright indispo → repli heuristique"
+            js=$(grep -oE '/assets/[A-Za-z0-9._-]+\.js' /tmp/root.html | head -n3)
+            for u in $js; do
+              if curl -fsS "https://$DOMAIN$u" | grep -Eq 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE'; then
+                echo "GATE_FAIL render_heuristic:bare_ref_live"
+                rollback
+                exit 1
+              fi
+            done
+            echo "GATE_OK render_heuristic"
+          fi
+
+          # --- retention (5 releases) — only after all gates pass ---
+          "${SSH_CMD[@]}" "ls -1dt $BASE/releases/*/ | tail -n +6 | xargs -r rm -rf"
+
+          echo "Deploye : $DOMAIN -> release $TS"
+          echo "=== GATE_RECAP ==="
+          echo "GATE_OK build_local"
+          echo "GATE_OK symlink"
+          echo "GATE_OK post_http_root"
+          echo "GATE_OK post_assets"
+          echo "GATE_OK render"
+          echo "GATE_OK deploy_complete"
