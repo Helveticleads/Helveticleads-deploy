@@ -154,7 +154,7 @@ jobs:
           fi
           if [ -n "$prov_ok" ]; then
             set +e
-            NODE_PATH="$PW_DIR/node_modules" node -e '
+            U="https://$DOMAIN/" NODE_PATH="$PW_DIR/node_modules" node -e '
               const { chromium } = require("playwright");
               (async () => {
                 const b = await chromium.launch({ args: ["--no-sandbox"] });
@@ -167,7 +167,7 @@ jobs:
                 if (errs.length || !ok) { console.error("RENDER_BAD", JSON.stringify({ok, errs})); process.exit(2); }
                 process.exit(0);
               })().catch(e => { console.error("PW_INFRA", String(e)); process.exit(3); });
-            ' U="https://$DOMAIN/"
+            '
             rc=$?
             set -e
             if   [ "$rc" = 0 ]; then echo "GATE_OK render_playwright"; render_ok=1
