@@ -139,21 +139,25 @@ jobs:
           done
           echo "GATE_OK post_assets"
 
-          # --- Gate rendu : Playwright best-effort, heuristique en repli ---
-          # Rollback UNIQUEMENT sur rendu avéré KO ; jamais sur panne d'infra Playwright.
+          # --- Gate rendu : Playwright (install ISOLÉ /tmp, hors workspace pnpm), heuristique en repli ---
           render_ok=""
           prov_ok=""
-          if npm install --no-save playwright >/tmp/pwnpm.log 2>&1 && npx playwright install chromium >/tmp/pwbin.log 2>&1; then
+          PW_DIR=/tmp/pw
+          mkdir -p "$PW_DIR"
+          if ( cd "$PW_DIR" && npm init -y >/dev/null 2>&1 && npm install playwright >/tmp/pwnpm.log 2>&1 ) \
+             && ( cd "$PW_DIR" && npx playwright install --with-deps chromium >/tmp/pwbin.log 2>&1 ); then
             prov_ok=1
           else
             echo "render: provisioning Playwright KO -> repli heuristique"
+            echo "----- pwnpm.log (tail) -----"; tail -n 25 /tmp/pwnpm.log 2>/dev/null || true
+            echo "----- pwbin.log (tail) -----"; tail -n 25 /tmp/pwbin.log 2>/dev/null || true
           fi
           if [ -n "$prov_ok" ]; then
             set +e
-            node -e '
+            NODE_PATH="$PW_DIR/node_modules" node -e '
               const { chromium } = require("playwright");
               (async () => {
-                const b = await chromium.launch();
+                const b = await chromium.launch({ args: ["--no-sandbox"] });
                 const p = await b.newPage();
                 const errs = [];
                 p.on("pageerror", e => errs.push(String(e)));
