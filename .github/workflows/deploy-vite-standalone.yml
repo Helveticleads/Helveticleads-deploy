@@ -1,0 +1,219 @@
+name: Deploy Vite standalone front
+
+on:
+  workflow_call:
+    inputs:
+      domain:
+        description: "Domaine, ex. helvetique-maconnerie.ch"
+        required: true
+        type: string
+      host:
+        description: "IP du VPS, ex. 180.149.199.219 (LWS) ou 179.237.70.246 (Infomaniak FR)"
+        required: true
+        type: string
+      build_command:
+        description: "Commande de build (racine du dépôt)"
+        required: false
+        default: "pnpm run build"
+        type: string
+      output_dir:
+        description: "Répertoire de sortie statique relatif à la racine"
+        required: false
+        default: "dist/public"
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DOMAIN: ${{ inputs.domain }}
+      HOST: ${{ inputs.host }}
+      BUILD_COMMAND: ${{ inputs.build_command }}
+      OUTPUT_DIR: ${{ inputs.output_dir }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            pnpm install
+          fi
+
+      - name: Build front prerendu
+        env:
+          NODE_ENV: production
+        run: ${{ inputs.build_command }}
+
+      - name: Gates build-time
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/$OUTPUT_DIR"
+          echo "SRC=$SRC"
+          echo "SRC=$SRC" >> "$GITHUB_ENV"
+
+          test -f "$SRC/index.html" || { echo "GATE_FAIL build:index_html_absent"; exit 1; }
+
+          for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' "$SRC/index.html" | sort -u); do
+            test -f "$SRC$r" || { echo "GATE_FAIL build:asset_manquant:$r"; exit 1; }
+          done
+
+          if grep -REl 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE' "$SRC/assets/" 2>/dev/null; then
+            echo "GATE_FAIL build:reference_nue_SITE_CONFIG"
+            exit 1
+          fi
+
+          echo "GATE_OK build_local"
+
+      - name: Cle SSH de deploiement
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ inputs.host }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploiement atomique gaté
+        run: |
+          set -euo pipefail
+          TS=$(date +%Y%m%d-%H%M%S)
+          BASE="/var/www/$DOMAIN"
+          SSH_OPTS=(-i ~/.ssh/id_ed25519)
+          SSH_CMD=(ssh "${SSH_OPTS[@]}" "deploy@$HOST")
+          RSYNC_SSH="ssh -i ~/.ssh/id_ed25519"
+
+          retry() {
+            local n=0 max=4
+            until "$@"; do
+              n=$((n + 1))
+              [ "$n" -ge "$max" ] && return 1
+              sleep $(( (2**n) + (RANDOM % 4) ))
+              echo "retry $n/$max…"
+            done
+          }
+
+          rollback() {
+            if [ -n "${PREV:-}" ]; then
+              "${SSH_CMD[@]}" "ln -sfn '$PREV' '$BASE/current'"
+              echo "ROLLBACK→$PREV"
+            else
+              echo "ROLLBACK_SKIP: PREV vide"
+            fi
+          }
+
+          echo "Source build : $SRC"
+
+          PREV="$("${SSH_CMD[@]}" "readlink -f '$BASE/current'" 2>/dev/null || true)"
+          echo "PREV=$PREV"
+
+          retry rsync -avz --delete \
+            -e "$RSYNC_SSH" \
+            "$SRC/" \
+            "deploy@$HOST:$BASE/releases/$TS/"
+
+          retry "${SSH_CMD[@]}" "ln -sfn '$BASE/releases/$TS' '$BASE/current'"
+          echo "GATE_OK symlink"
+
+          code=$(curl -fsS -o /tmp/root.html -w '%{http_code}' "https://$DOMAIN/" || echo 000)
+          if ! { [ "$code" = "200" ] && grep -q 'id="root"' /tmp/root.html; }; then
+            echo "GATE_FAIL post:http_root:$code"
+            rollback
+            exit 1
+          fi
+          echo "GATE_OK post_http_root"
+
+          for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' /tmp/root.html | sort -u); do
+            ac=$(curl -fsS -o /dev/null -w '%{http_code}' "https://$DOMAIN$r" || echo 000)
+            if [ "$ac" != "200" ]; then
+              echo "GATE_FAIL post:asset:$r:$ac"
+              rollback
+              exit 1
+            fi
+          done
+          echo "GATE_OK post_assets"
+
+          render_ok=""
+          prov_ok=""
+          PW_DIR=/tmp/pw
+          mkdir -p "$PW_DIR"
+          if ( cd "$PW_DIR" && npm init -y >/dev/null 2>&1 && npm install playwright >/tmp/pwnpm.log 2>&1 ) \
+             && ( cd "$PW_DIR" && npx playwright install --with-deps chromium >/tmp/pwbin.log 2>&1 ); then
+            prov_ok=1
+          else
+            echo "render: provisioning Playwright KO -> repli heuristique"
+            echo "----- pwnpm.log (tail) -----"; tail -n 25 /tmp/pwnpm.log 2>/dev/null || true
+            echo "----- pwbin.log (tail) -----"; tail -n 25 /tmp/pwbin.log 2>/dev/null || true
+          fi
+          if [ -n "$prov_ok" ]; then
+            set +e
+            U="https://$DOMAIN/" NODE_PATH="$PW_DIR/node_modules" node -e '
+              const { chromium } = require("playwright");
+              (async () => {
+                const b = await chromium.launch({ args: ["--no-sandbox"] });
+                const p = await b.newPage();
+                const errs = [];
+                p.on("pageerror", e => errs.push(String(e)));
+                let nav = false;
+                for (let i = 1; i <= 3 && !nav; i++) {
+                  try {
+                    await p.goto(process.env.U, { waitUntil: "domcontentloaded", timeout: 30000 });
+                    nav = true;
+                  } catch (e) {
+                    console.error("PW_NAV_RETRY " + i + "/3", String(e));
+                    if (i < 3) await new Promise(r => setTimeout(r, 2000 * i));
+                  }
+                }
+                if (!nav) { console.error("PW_INFRA_NAV", "goto échoué après 3 tentatives"); await b.close(); process.exit(3); }
+                let mounted = false;
+                try {
+                  await p.waitForFunction(() => {
+                    const el = document.querySelector("#root");
+                    return !!el && (el.children.length > 0 || (el.textContent || "").trim().length > 50);
+                  }, { timeout: 20000 });
+                  mounted = true;
+                } catch (e) { mounted = false; }
+                await b.close();
+                if (errs.length) console.error("PW_PAGEERRORS", JSON.stringify(errs));
+                if (!mounted) { console.error("RENDER_BAD_MOUNT"); process.exit(2); }
+                process.exit(0);
+              })().catch(e => { console.error("PW_INFRA", String(e)); process.exit(3); });
+            '
+            rc=$?
+            set -e
+            if   [ "$rc" = 0 ]; then echo "GATE_OK render_playwright"; render_ok=1
+            elif [ "$rc" = 2 ]; then echo "GATE_FAIL render_playwright:page"; rollback; exit 1
+            else                      echo "render: Playwright infra KO (rc=$rc) -> repli heuristique"
+            fi
+          fi
+          if [ -z "$render_ok" ]; then
+            for u in $(grep -oE '/assets/[A-Za-z0-9._-]+\.js' /tmp/root.html | head -n3); do
+              if curl -fsS "https://$DOMAIN$u" | grep -Eq 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE'; then
+                echo "GATE_FAIL render_heuristic:bare_ref_live"
+                rollback
+                exit 1
+              fi
+            done
+            echo "GATE_OK render_heuristic"
+          fi
+
+          "${SSH_CMD[@]}" "ls -1dt $BASE/releases/*/ | tail -n +6 | xargs -r rm -rf"
+
+          echo "Deploye : $DOMAIN -> release $TS"
+          echo "=== GATE_RECAP ==="
+          echo "GATE_OK build_local"
+          echo "GATE_OK symlink"
+          echo "GATE_OK post_http_root"
+          echo "GATE_OK post_assets"
+          echo "GATE_OK render"
+          echo "GATE_OK deploy_complete"
