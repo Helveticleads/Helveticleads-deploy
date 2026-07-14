@@ -15,6 +15,11 @@ on:
         description: "IP du VPS, ex. 179.237.70.246 (FR) ou 179.237.70.207 (DE)"
         required: true
         type: string
+      smoke_path:
+        description: "Chemin URL post-deploy (defaut /). Ex. /de/ si BASE_PATH=/de"
+        required: false
+        type: string
+        default: "/"
 
 jobs:
   deploy:
@@ -23,6 +28,7 @@ jobs:
       ARTIFACT: ${{ inputs.artifact }}
       DOMAIN: ${{ inputs.domain }}
       HOST: ${{ inputs.host }}
+      SMOKE_PATH: ${{ inputs.smoke_path }}
     steps:
       - uses: actions/checkout@v4
 
@@ -121,7 +127,7 @@ jobs:
           echo "GATE_OK symlink"
 
           # --- post-bascule gates ---
-          code=$(curl -fsS -o /tmp/root.html -w '%{http_code}' "https://$DOMAIN/" || echo 000)
+          code=$(curl -fsS -o /tmp/root.html -w '%{http_code}' "https://$DOMAIN$SMOKE_PATH" || echo 000)
           if ! { [ "$code" = "200" ] && grep -q 'id="root"' /tmp/root.html; }; then
             echo "GATE_FAIL post:http_root:$code"
             rollback
@@ -129,7 +135,7 @@ jobs:
           fi
           echo "GATE_OK post_http_root"
 
-          for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' /tmp/root.html | sort -u); do
+          for r in $(grep -oE '/[A-Za-z0-9._/-]*assets/[A-Za-z0-9._-]+\.(js|css)' /tmp/root.html | sort -u); do
             ac=$(curl -fsS -o /dev/null -w '%{http_code}' "https://$DOMAIN$r" || echo 000)
             if [ "$ac" != "200" ]; then
               echo "GATE_FAIL post:asset:$r:$ac"
@@ -154,7 +160,7 @@ jobs:
           fi
           if [ -n "$prov_ok" ]; then
             set +e
-            U="https://$DOMAIN/" NODE_PATH="$PW_DIR/node_modules" node -e '
+            U="https://$DOMAIN$SMOKE_PATH" NODE_PATH="$PW_DIR/node_modules" node -e '
               const { chromium } = require("playwright");
               (async () => {
                 const b = await chromium.launch({ args: ["--no-sandbox"] });
@@ -194,7 +200,7 @@ jobs:
             fi
           fi
           if [ -z "$render_ok" ]; then
-            for u in $(grep -oE '/assets/[A-Za-z0-9._-]+\.js' /tmp/root.html | head -n3); do
+            for u in $(grep -oE '/[A-Za-z0-9._/-]*assets/[A-Za-z0-9._-]+\.js' /tmp/root.html | head -n3); do
               if curl -fsS "https://$DOMAIN$u" | grep -Eq 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE'; then
                 echo "GATE_FAIL render_heuristic:bare_ref_live"
                 rollback
