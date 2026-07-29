@@ -105,17 +105,17 @@ jobs:
           }
 
           rollback() {
-            if [ -n "${PREV:-}" ]; then
+            if [ -n "${PREV:-}" ] && [ "$PREV" != "$BASE/current" ] && "${SSH_CMD[@]}" "test -d '$PREV'"; then
               "${SSH_CMD[@]}" "ln -sfn '$PREV' '$BASE/current'"
               echo "ROLLBACK→$PREV"
             else
-              echo "ROLLBACK_SKIP: PREV vide"
+              echo "ROLLBACK_SKIP: PREV vide/invalide (${PREV:-∅})"
             fi
           }
 
           echo "Source build : $SRC"
 
-          PREV="$("${SSH_CMD[@]}" "readlink -f '$BASE/current'" 2>/dev/null || true)"
+          PREV="$("${SSH_CMD[@]}" "readlink '$BASE/current'" 2>/dev/null || true)"
           echo "PREV=$PREV"
 
           retry rsync -avz --delete \
