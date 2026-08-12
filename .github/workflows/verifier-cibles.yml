@@ -207,7 +207,7 @@ jobs:
           [ "$n_imp" -gt 0 ] && { echo "→ MESURE IMPOSSIBLE : on n'a pas pu juger. Avertissement, pas un feu vert."; exit 2; }
           echo "→ toutes les cibles sont vérifiées."
 
-GARDE_EOF
+          GARDE_EOF
           chmod +x .psl/verifier-cibles-deploy.sh
 
       - name: Vérifier les cibles
