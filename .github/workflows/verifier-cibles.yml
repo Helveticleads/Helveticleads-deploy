@@ -1,12 +1,13 @@
 # Porte AVANT fusion : le deploy.yml de ce dépôt vise-t-il le bon serveur
 # et le bon répertoire ?
 #
-# Appelé par le ci.yml de chaque site en `uses:`. Le script est EMBARQUÉ ici
-# plutôt que récupéré du monorepo : celui-ci est privé, et le lire depuis un
-# dépôt appelant demanderait un jeton. La contrepartie est une duplication —
-# la source de vérité reste deploy/outils-seo/verifier-cibles-deploy.sh dans
-# Premium-Suisse-Leads, et l'étape « Sync » ci-dessous échoue si les deux
-# copies divergent d'empreinte.
+# ⚠️ FICHIER GÉNÉRÉ — ne pas éditer à la main.
+# Source de vérité : deploy/outils-seo/verifier-cibles-deploy.sh
+# Régénérer : bash deploy/outils-seo/generer-workflow-cibles.sh
+# La CI du monorepo échoue si ce fichier ne correspond plus au script.
+#
+# Le script est EMBARQUÉ ici plutôt que récupéré du monorepo : celui-ci est
+# privé, et le lire depuis un dépôt appelant demanderait un jeton.
 name: Verifier cibles de deploiement
 
 on:
@@ -206,7 +207,6 @@ jobs:
           [ "$n_mis" -gt 0 ] && { echo "→ MISMATCH : une cible de déploiement est fausse. BLOQUANT."; exit 1; }
           [ "$n_imp" -gt 0 ] && { echo "→ MESURE IMPOSSIBLE : on n'a pas pu juger. Avertissement, pas un feu vert."; exit 2; }
           echo "→ toutes les cibles sont vérifiées."
-
           GARDE_EOF
           chmod +x .psl/verifier-cibles-deploy.sh
 
