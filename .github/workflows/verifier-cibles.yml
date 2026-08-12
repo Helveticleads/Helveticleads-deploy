@@ -1,0 +1,227 @@
+# Porte AVANT fusion : le deploy.yml de ce dépôt vise-t-il le bon serveur
+# et le bon répertoire ?
+#
+# Appelé par le ci.yml de chaque site en `uses:`. Le script est EMBARQUÉ ici
+# plutôt que récupéré du monorepo : celui-ci est privé, et le lire depuis un
+# dépôt appelant demanderait un jeton. La contrepartie est une duplication —
+# la source de vérité reste deploy/outils-seo/verifier-cibles-deploy.sh dans
+# Premium-Suisse-Leads, et l'étape « Sync » ci-dessous échoue si les deux
+# copies divergent d'empreinte.
+name: Verifier cibles de deploiement
+
+on:
+  workflow_call:
+    inputs:
+      serveurs_connus:
+        description: "Surcharge ip=nom, séparés par des espaces"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  cibles:
+    name: Cibles de déploiement (host↔DNS, domain↔code)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Le coureur résout-il le DNS ?
+        run: |
+          set -uo pipefail
+          command -v dig >/dev/null || { echo "::warning::dig absent, installation"; sudo apt-get install -y -qq dnsutils >/dev/null 2>&1; }
+          echo "témoin de résolution :"
+          dig +short helvetique-piscine.ch | head -2
+          dig +short helvetique-piscine.ch | grep -qE '^[0-9.]+$' \
+            || echo "::warning::le coureur ne résout pas le DNS — le contrôle A sortira en MESURE IMPOSSIBLE"
+
+      - name: Écrire la garde
+        run: |
+          mkdir -p .psl
+          cat > .psl/verifier-cibles-deploy.sh <<'GARDE_EOF'
+          #!/bin/bash
+          # Le deploy.yml d'un site vise-t-il le bon serveur, et le bon répertoire ?
+          #
+          # Deux façons distinctes de se tromper, donc deux contrôles gardés séparés :
+          #
+          #   A · host ↔ DNS      le serveur déclaré est-il celui qui sert le domaine ?
+          #                       Défaut vécu : helvetique-dentaire.ch visait Infomaniak FR
+          #                       alors qu'il est servi par LWS. Le rsync partait dans le
+          #                       vide — et avec une clé valide, le run aurait pu finir AU
+          #                       VERT sans rien mettre en ligne.
+          #
+          #   B · domain ↔ code   le domaine déclaré est-il celui de CE dépôt ?
+          #                       Plus grave que A : le workflow écrit dans
+          #                       /var/www/<domain>/. Un domain copié d'un voisin vivant
+          #                       sur le même serveur n'écrit pas dans le vide — il
+          #                       ÉCRASE le site du voisin.
+          #
+          # 100 % STATIQUE : pas de SSH, pas de credentials. Ce script est une porte
+          # AVANT fusion, faite pour tourner en CI. Il attrape le copier-coller du
+          # voisin ; il ne peut pas attraper une double erreur cohérente — un dépôt dont
+          # le deploy.yml ET le code désigneraient le même mauvais domaine. Seul le
+          # serveur juge de ça : voir verifier-vhosts.sh et verifier-fichiers.sh.
+          #
+          #   bash deploy/outils-seo/verifier-cibles-deploy.sh [chemin-dépôt …]
+          #
+          # Sans argument : toute la flotte. Sorties :
+          #   0 · A et B conformes partout
+          #   1 · au moins un MISMATCH            (bloquant : une cible est fausse)
+          #   2 · au moins une MESURE IMPOSSIBLE  (avertissement : on n'a pas pu juger)
+          # Si les deux coexistent : 1, mais les deux classes sont listées.
+          set -uo pipefail
+
+          RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+          PRINCIPALE="$(git -C "$RACINE" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')"
+          BASE="${PSL_FLOTTE:-${PRINCIPALE:-$RACINE}}"
+
+          # Serveurs connus. Une IP hors de cette liste n'est pas un mismatch : c'est une
+          # mesure impossible — proxy, CDN, ou serveur qu'on ne connaît pas encore.
+          # Liste plate « ip=nom », pas un tableau associatif : bash 3.2 (macOS) n'en a
+          # pas, et un outil qui ne tourne que sur le coureur CI ne sert pas au moment
+          # où on en a le plus besoin — juste avant de fusionner, sur son poste.
+          SERVEURS_CONNUS="${PSL_SERVEURS_CONNUS:-179.237.70.246=Infomaniak_FR 180.149.199.219=LWS 178.105.216.42=Hetzner 179.237.70.207=Infomaniak_DE 212.227.76.165=IONOS 159.195.149.181=Netcup}"
+          nom_serveur() { for e in $SERVEURS_CONNUS; do [ "${e%%=*}" = "$1" ] && { echo "${e#*=}" | tr _ ' '; return 0; }; done; return 1; }
+
+          n_conf=0; n_mis=0; n_imp=0
+
+          # Lecture d'un fichier du dépôt : origin/main si disponible, sinon l'arbre
+          # de travail. Une seule porte d'entrée, pour que les deux modes ne divergent
+          # jamais silencieusement.
+          lire() { # $1 dépôt  $2 chemin
+            git -C "$1" show "origin/main:$2" 2>/dev/null || cat "$1/$2" 2>/dev/null
+          }
+          lister() { # $1 dépôt
+            git -C "$1" ls-tree -r --name-only origin/main 2>/dev/null \
+              || (cd "$1" && git ls-files 2>/dev/null) \
+              || (cd "$1" && find . -type f | sed 's|^\./||')
+          }
+
+          champ_yaml() { # $1 texte  $2 nom
+            printf '%s' "$1" | sed -nE "s/^[[:space:]]+$2:[[:space:]]*[\"']?([^\"'#]+)[\"']?[[:space:]]*$/\1/p" | head -1 | tr -d ' '
+          }
+
+          # Domaine attendu, par cascade de sources NOMMÉES. Jamais un motif d'URL
+          # générique : `config.ts` contient l'URL du script Umami avant celle du site,
+          # et « la première URL en .ch » signalait trois sites sains comme fautifs.
+          domaine_attendu() { # $1 dépôt → "domaine|sources" ou "|raison" si indécidable
+            local d="$1" f v; local -a paires=()
+            for spec in "brand.ts:src/data/brand\.ts$:canonicalBase" \
+                        "config.ts:src/data/config\.ts$:baseUrl" \
+                        "sitemap:scripts/generate-sitemap:DOMAIN|SITE_BASE|BASE_URL|SITE_URL|BASE|ORIGIN"; do
+              local lab=${spec%%:*} reste=${spec#*:} motif champ
+              motif=${reste%%:*}; champ=${reste#*:}
+              f=$(lister "$d" | grep -E "$motif" | head -1)
+              [ -n "$f" ] || continue
+              # Deux temps plutôt qu'une expression unique : on SÉLECTIONNE d'abord la
+              # ligne par le nom du champ, ancré en début de ligne, puis on en extrait
+              # l'URL. Une seule expression mêlant alternance, délimiteur et groupes a
+              # produit tour à tour « 25 mismatch » puis un bloc de console.log en guise
+              # de domaine — deux fois un verdict faux sur une flotte saine.
+              ligne=$(lire "$d" "$f" \
+                      | grep -E "^[[:space:]]*(export[[:space:]]+)?(const|let|var)?[[:space:]]*($champ)[[:space:]]*[:=]" | head -1)
+              v=$(printf '%s' "$ligne" | sed -nE 's%.*https?://([A-Za-z0-9.-]+).*%\1%p')
+              [ -n "$v" ] && paires+=("$lab=$v")
+            done
+            [ ${#paires[@]} -eq 0 ] && { echo "|aucune source canonique dans le code"; return; }
+            local uniq; uniq=$(printf '%s\n' "${paires[@]}" | cut -d= -f2 | sort -u | wc -l | tr -d ' ')
+            [ "$uniq" = 1 ] || { echo "|sources en désaccord : ${paires[*]}"; return; }
+            echo "$(printf '%s' "${paires[0]#*=}")|$(printf '%s,' "${paires[@]%%=*}" | sed 's/,$//')"
+          }
+
+          nom_normalise() { # témoin faible : préfixe pays retiré, .ch ajouté s'il manque
+            local n; n=$(basename "$1"); n=${n#FR-}; n=${n#DE-}; n=${n#IT-}
+            case "$n" in *.ch) echo "$n";; *) echo "$n.ch";; esac
+          }
+
+          verifier() { # $1 chemin du dépôt
+            local d="$1" site; site=$(basename "$d")
+            # En CI, le dépôt est extrait sur la branche de la PR : `origin/main` n'y
+            # est pas forcément résolvable, et c'est le contenu PROPOSÉ qu'on veut
+            # juger, pas celui de main. On lit donc l'arbre de travail à défaut.
+            local y; y=$(lire "$d" .github/workflows/deploy.yml)
+            [ -n "$y" ] || return 0
+            local host dom; host=$(champ_yaml "$y" host); dom=$(champ_yaml "$y" domain)
+
+            # ── CONTRÔLE A · host ↔ DNS ──────────────────────────────────────────
+            local va detail_a ip
+            if [ -z "$host" ] || [ -z "$dom" ]; then va="IMPOSSIBLE"; detail_a="host ou domain absent du deploy.yml"
+            else
+              ips=$(dig +short "$dom" 2>/dev/null | grep -E '^[0-9.]+$')
+              nb=$(printf '%s' "$ips" | grep -c . )
+              if   [ "$nb" -eq 0 ]; then va="IMPOSSIBLE"; detail_a="le domaine ne résout vers aucune IPv4"
+              elif [ "$nb" -gt 1 ]; then va="IMPOSSIBLE"; detail_a="$nb IP (proxy ou CDN ?)"
+              else ip=$(printf '%s' "$ips" | head -1)
+                if   ! nom_serveur "$ip" >/dev/null; then va="IMPOSSIBLE"; detail_a="IP $ip hors des serveurs connus"
+                elif [ "$host" = "$ip" ];            then va="CONFORME";   detail_a="$(nom_serveur "$ip")"
+                else va="MISMATCH"; detail_a="déclaré $(nom_serveur "$host" || echo "$host"), servi par $(nom_serveur "$ip")"; fi
+              fi
+            fi
+
+            # ── CONTRÔLE B · domain ↔ code ───────────────────────────────────────
+            local vb detail_b att src temoin
+            temoin=$(nom_normalise "$d")
+            if [ -z "$dom" ]; then vb="IMPOSSIBLE"; detail_b="domain absent du deploy.yml"
+            else
+              local r; r=$(domaine_attendu "$d"); att=${r%%|*}; src=${r#*|}
+              if [ -z "$att" ]; then
+                vb="IMPOSSIBLE"; detail_b="$src"
+                # Témoin faible : contexte, jamais preuve. Un dépôt renommé le rendrait
+                # faux sans que rien ne le dise.
+                [ "$dom" = "$temoin" ] && detail_b="$detail_b · concorde au nom du dépôt (témoin faible, non retenu comme preuve)"
+              elif [ "$dom" = "$att" ]; then vb="CONFORME"; detail_b="$src"
+              else vb="MISMATCH"; detail_b="le code dit $att (source $src)"; fi
+            fi
+
+            local pire=CONFORME
+            case "$va$vb" in *MISMATCH*) pire=MISMATCH ;; *IMPOSSIBLE*) pire=IMPOSSIBLE ;; esac
+            case "$pire" in
+              CONFORME)   n_conf=$((n_conf+1)); [ -n "${PSL_VERBEUX:-}" ] || return 0 ;;
+              MISMATCH)   n_mis=$((n_mis+1)) ;;
+              IMPOSSIBLE) n_imp=$((n_imp+1)) ;;
+            esac
+            printf '%-40s A=%-10s B=%-10s\n' "$site" "$va" "$vb"
+            [ "$va" != CONFORME ] && printf '    A · %s\n' "$detail_a"
+            [ "$vb" != CONFORME ] && printf '    B · %s\n' "$detail_b"
+            return 0
+          }
+
+          if [ $# -gt 0 ]; then for d in "$@"; do verifier "$d"; done
+          else
+            for vol in "$BASE"/0[1-9]-*; do
+              [ -d "$vol" ] || continue
+              for d in "$vol"/*; do [ -d "$d/.git" ] && verifier "$d"; done
+            done
+          fi
+
+          echo
+          # La garde qu'il me manquait : ce script a d'abord rendu EXIT 0 en n'ayant
+          # mesuré AUCUN dépôt — le défaut même qu'il traque, dans son propre code.
+          total=$((n_conf + n_mis + n_imp))
+          if [ "$total" -eq 0 ]; then
+            echo "→ MESURE IMPOSSIBLE : aucun dépôt examiné (flotte introuvable sous $BASE ?)"
+            exit 2
+          fi
+          echo "TOTAL : $n_conf conformes · $n_mis mismatch · $n_imp mesures impossibles"
+          [ "$n_mis" -gt 0 ] && { echo "→ MISMATCH : une cible de déploiement est fausse. BLOQUANT."; exit 1; }
+          [ "$n_imp" -gt 0 ] && { echo "→ MESURE IMPOSSIBLE : on n'a pas pu juger. Avertissement, pas un feu vert."; exit 2; }
+          echo "→ toutes les cibles sont vérifiées."
+
+GARDE_EOF
+          chmod +x .psl/verifier-cibles-deploy.sh
+
+      - name: Vérifier les cibles
+        env:
+          PSL_SERVEURS_CONNUS: ${{ inputs.serveurs_connus }}
+          PSL_VERBEUX: "1"
+        run: |
+          set +e
+          bash .psl/verifier-cibles-deploy.sh .
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "✅ cibles vérifiées" ;;
+            1) echo "::error::MISMATCH — une cible de déploiement est fausse. Ce déploiement écrirait au mauvais endroit."; exit 1 ;;
+            2) echo "::warning::MESURE IMPOSSIBLE — la garde n'a pas pu juger. Ce n'est pas un feu vert."; exit 0 ;;
+            *) echo "::error::code inattendu $code"; exit 1 ;;
+          esac
