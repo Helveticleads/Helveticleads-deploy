@@ -126,8 +126,18 @@ jobs:
           retry "${SSH_CMD[@]}" "ln -sfn '$BASE/releases/$TS' '$BASE/current'"
           echo "GATE_OK symlink"
 
+          # Courte pause : laisse nginx / éventuel cache fichier digérer la bascule.
+          sleep 2
+
+          CURL_NOSTORE=(curl -fsS -H 'Cache-Control: no-store' -H 'Pragma: no-cache')
+
           # --- post-bascule gates ---
-          code=$(curl -fsS -o /tmp/root.html -w '%{http_code}' "https://$DOMAIN$SMOKE_PATH" || echo 000)
+          # Le HTML servi peut rester brièvement périmé (open_file_cache / proxy).
+          # On exige un 200 + #root, mais les assets se lisent depuis le BUILD
+          # qu'on vient d'uploader ($SRC/index.html) — jamais depuis un HTML
+          # HTTP éventuellement ancien, sinon GATE_FAIL sur un hash obsolète
+          # absent de la nouvelle release (vu garten 2026-09-16, run 35055051643).
+          code=$("${CURL_NOSTORE[@]}" -o /tmp/root.html -w '%{http_code}' "https://$DOMAIN$SMOKE_PATH" || echo 000)
           if ! { [ "$code" = "200" ] && grep -q 'id="root"' /tmp/root.html; }; then
             echo "GATE_FAIL post:http_root:$code"
             rollback
@@ -135,8 +145,13 @@ jobs:
           fi
           echo "GATE_OK post_http_root"
 
-          for r in $(grep -oE '/[A-Za-z0-9._/-]*assets/[A-Za-z0-9._-]+\.(js|css)' /tmp/root.html | sort -u); do
-            ac=$(curl -fsS -o /dev/null -w '%{http_code}' "https://$DOMAIN$r" || echo 000)
+          for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' "$SRC/index.html" | sort -u); do
+            ac=000
+            for attempt in 1 2 3; do
+              ac=$("${CURL_NOSTORE[@]}" -o /dev/null -w '%{http_code}' "https://$DOMAIN$r" || echo 000)
+              [ "$ac" = "200" ] && break
+              sleep $((attempt * 2))
+            done
             if [ "$ac" != "200" ]; then
               echo "GATE_FAIL post:asset:$r:$ac"
               rollback
