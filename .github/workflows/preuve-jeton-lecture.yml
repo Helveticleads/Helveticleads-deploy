@@ -3,6 +3,12 @@ name: Preuve jeton lecture depots
 
 on:
   workflow_dispatch:
+  # Sur branche non-default, workflow_dispatch est invisible tant que le
+  # fichier n'est pas sur main. Le push sur cette branche permet la preuve
+  # sans fusionner.
+  push:
+    branches: [ops/detecteur-ecart]
+    paths: [.github/workflows/preuve-jeton-lecture.yml]
 
 jobs:
   preuve:
