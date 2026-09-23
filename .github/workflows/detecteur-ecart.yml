@@ -37,11 +37,15 @@ jobs:
           DETECTEUR_MODE: ${{ github.event.inputs.mode || 'normal' }}
         run: |
           set -euo pipefail
-          # Sur push hors workflow_dispatch, forcer preuve une fois pour les tests
-          # de branche : si l'événement est push et le message contient [preuve],
-          # basculer. Sinon normal.
-          if [ "${{ github.event_name }}" = "push" ] && echo "${{ github.event.head_commit.message }}" | grep -q '\[preuve\]'; then
-            export DETECTEUR_MODE=preuve
+          if [ "${{ github.event_name }}" = "push" ]; then
+            msg="${{ github.event.head_commit.message }}"
+            if echo "$msg" | grep -q '\[preuve-sain\]'; then
+              export DETECTEUR_MODE=normal
+              # Un site connu à jour (Last-Modified récent) pour fermer l'issue.
+              export DETECTEUR_UNIQUEMENT="FR-helvetique-piscine.ch|helvetique-piscine.ch"
+            elif echo "$msg" | grep -q '\[preuve\]'; then
+              export DETECTEUR_MODE=preuve
+            fi
           fi
           chmod +x ops/detecteur-ecart/detecteur.sh
           bash ops/detecteur-ecart/detecteur.sh

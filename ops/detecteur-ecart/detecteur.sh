@@ -89,12 +89,19 @@ last_modified() {
 
 enregistrer() {
   local etat="$1" repo="$2" domain="$3" commit="$4" servi="$5" ecart="$6" raison="$7"
+  # Jamais de champ vide : bash IFS=tab collapserait les colonnes du rapport.
+  [ -n "$domain" ] || domain="—"
+  [ -n "$repo" ] || repo="—"
+  [ -n "$commit" ] || commit="—"
+  [ -n "$servi" ] || servi="—"
+  [ -n "$ecart" ] || ecart="—"
+  [ -n "$raison" ] || raison="—"
   local line
   line=$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$domain" "$repo" "$commit" "$servi" "$ecart" "$raison")
   case "$etat" in
-    A_JOUR)     echo "$line" >> "$RESULT_DIR/a-jour.tsv";     n_a_jour=$((n_a_jour+1)); log "A_JOUR     ${domain:-—} ($repo)" ;;
-    EN_RETARD)  echo "$line" >> "$RESULT_DIR/en-retard.tsv";  n_en_retard=$((n_en_retard+1)); log "EN_RETARD  ${domain:-—} écart=${ecart}h" ;;
-    NON_MESURE) echo "$line" >> "$RESULT_DIR/non-mesure.tsv"; n_non_mesure=$((n_non_mesure+1)); log "NON_MESURE ${domain:-—} — $raison" ;;
+    A_JOUR)     echo "$line" >> "$RESULT_DIR/a-jour.tsv";     n_a_jour=$((n_a_jour+1)); log "A_JOUR     $domain ($repo)" ;;
+    EN_RETARD)  echo "$line" >> "$RESULT_DIR/en-retard.tsv";  n_en_retard=$((n_en_retard+1)); log "EN_RETARD  $domain écart=${ecart}h" ;;
+    NON_MESURE) echo "$line" >> "$RESULT_DIR/non-mesure.tsv"; n_non_mesure=$((n_non_mesure+1)); log "NON_MESURE $domain — $raison" ;;
   esac
 }
 
@@ -185,8 +192,17 @@ n_mesurables=${#SITES_REPO[@]}
 n_exclus=${#EXCL_REPO[@]}
 M_declares=$((n_mesurables + n_exclus))
 
+# Surcharge de preuve : une seule paire repo|domaine (fermeture d'issue saine).
+if [ -n "${DETECTEUR_UNIQUEMENT:-}" ]; then
+  SITES_REPO=("${DETECTEUR_UNIQUEMENT%%|*}")
+  SITES_DOMAIN=("${DETECTEUR_UNIQUEMENT#*|}")
+  n_mesurables=1
+  # Les exclus restent au dénominateur déclaré ; M ne change pas.
+  log "UNIQUEMENT=${DETECTEUR_UNIQUEMENT} (preuve fermeture)"
+fi
+
 log "=== Détecteur d'écart — mode=$MODE ==="
-log "Déclarés M=$M_declares (mesurables=$n_mesurables + exclus=$n_exclus)"
+log "Déclarés M=$M_declares (mesurables flotte=$n_mesurables + exclus=$n_exclus)"
 
 # --- auth ------------------------------------------------------------------
 if ! verifier_jeton; then
@@ -210,9 +226,8 @@ if [ "$MODE" = "preuve" ] && [ -z "$AUTH_FAIL" ]; then
 fi
 
 N_mesures=$((n_a_jour + n_en_retard + n_non_mesure))
-# En mode preuve, N_mesures > n_mesurables (injections). Le dénominateur
-# métier reste M/X/mesurables ; on signale l'écart de preuve à part.
-if [ "$MODE" != "preuve" ]; then
+# En mode preuve / uniquement, N_mesures peut différer de la flotte complète.
+if [ "$MODE" != "preuve" ] && [ -z "${DETECTEUR_UNIQUEMENT:-}" ]; then
   if [ "$N_mesures" -ne "$n_mesurables" ]; then
     log "ERREUR dénominateur : mesurés($N_mesures) ≠ mesurables($n_mesurables)"
     exit 2
