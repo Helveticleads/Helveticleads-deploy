@@ -1,0 +1,112 @@
+# Détecteur d'écart entre ce qui est fusionné (main) et ce qui est servi
+# (Last-Modified + empreinte sha256 du HTML). Ne publie rien. Ne répare rien.
+name: Detecteur ecart fusionne servi
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "normal | preuve (injections) | sabotage-auth (jeton vidé)"
+        type: choice
+        options: [normal, preuve, sabotage-auth]
+        default: normal
+      ajout_preuve:
+        description: "Si true, ajoute un dépôt fictif (preuve dénominateur M)"
+        type: boolean
+        default: false
+      uniquement:
+        description: "Optionnel : repo|domaine pour un passage ciblé (preuve fermeture)"
+        type: string
+        default: ""
+  push:
+    branches: [feat/detecteur-ecart]
+    paths:
+      - "ops/detecteur-ecart/**"
+      - ".github/workflows/detecteur-ecart.yml"
+  pull_request:
+    paths:
+      - "ops/detecteur-ecart/**"
+      - ".github/workflows/detecteur-ecart.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  preuves:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Harness 8 preuves (dry-run sauf upsert ciblé)
+        env:
+          JETON_LECTURE_DEPOTS: ${{ secrets.JETON_LECTURE_DEPOTS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DETECTEUR_SKIP_ISSUE: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          chmod +x ops/detecteur-ecart/detecteur.sh ops/detecteur-ecart/preuves.sh
+          bash ops/detecteur-ecart/preuves.sh
+
+  detecter:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Détecter les écarts
+        env:
+          JETON_LECTURE_DEPOTS: ${{ secrets.JETON_LECTURE_DEPOTS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DETECTEUR_MODE: ${{ github.event.inputs.mode || 'normal' }}
+          DETECTEUR_UNIQUEMENT: ${{ github.event.inputs.uniquement || '' }}
+        run: |
+          set -euo pipefail
+          MODE="${DETECTEUR_MODE}"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            msg="${{ github.event.head_commit.message }}"
+            if echo "$msg" | grep -q '\[preuve-sain\]'; then
+              MODE=normal
+              export DETECTEUR_UNIQUEMENT="FR-helvetique-piscine.ch|helvetique-piscine.ch"
+            elif echo "$msg" | grep -q '\[preuve-auth\]'; then
+              MODE=sabotage-auth
+            elif echo "$msg" | grep -q '\[preuve\]'; then
+              MODE=preuve
+            else
+              # Push de livraison : ne pas balayer toute la flotte (évite bruit).
+              # Les passages flotte = schedule / workflow_dispatch.
+              echo "Push livraison — skip flotte (utiliser workflow_dispatch)."
+              exit 0
+            fi
+          fi
+          if [ "${{ github.event.inputs.ajout_preuve || false }}" = "true" ]; then
+            export DETECTEUR_AJOUT_PREUVE=1
+            export DETECTEUR_M_PRECEDENT=71
+          fi
+          if [ "$MODE" = "sabotage-auth" ]; then
+            echo "SABOTAGE : jeton vidé pour preuve 401/refus"
+            export JETON_LECTURE_DEPOTS=""
+            export DETECTEUR_MODE=normal
+          else
+            export DETECTEUR_MODE="$MODE"
+          fi
+          chmod +x ops/detecteur-ecart/detecteur.sh
+          bash ops/detecteur-ecart/detecteur.sh
+
+      - name: Afficher le résumé
+        if: always()
+        run: |
+          echo "=== meta ==="
+          cat .detecteur-out/meta.txt 2>/dev/null || true
+          echo "=== issue ==="
+          cat .detecteur-out/issue-url.txt 2>/dev/null || true
+          echo "=== en retard ==="
+          cat .detecteur-out/en-retard.tsv 2>/dev/null || true
+          echo "=== non mesuré (extrait) ==="
+          head -40 .detecteur-out/non-mesure.tsv 2>/dev/null || true
+          echo "=== tête du rapport ==="
+          head -40 .detecteur-out/issue-body.md 2>/dev/null || true

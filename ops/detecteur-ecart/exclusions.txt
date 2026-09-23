@@ -1,0 +1,20 @@
+# Exclusions du détecteur d'écart fusionné ↔ servi.
+# Format : dépôt<TAB>motif
+# Une exclusion sans motif est interdite.
+# Le nombre d'exclus apparaît dans chaque rapport (dénominateur).
+
+Helveticleads-nuisibles-urgence	Lovable — aucune CI, aucun déploiement ; Frédéric n'a pas accès
+Helveticleads-emergenza-infestanti	Lovable — aucune CI, aucun déploiement ; Frédéric n'a pas accès
+Helveticleads-notfall-schaedlinge	Lovable — aucune CI, aucun déploiement ; Frédéric n'a pas accès
+Helveticleads-plumber-switzerland	Lovable — aucune CI, aucun déploiement ; Frédéric n'a pas accès
+Helveticleads-cool-roof-switzerland	Lovable — aucune CI, aucun déploiement ; Frédéric n'a pas accès
+FR-helvetique-paysagiste.ch	site en draft, aucun enregistrement A
+IT-elvetica-isolamento.ch	dépôt italien — non mis en ligne
+IT-elvetica-infestanti.ch	dépôt italien — non mis en ligne
+IT-elvetica-spa.ch	dépôt italien — non mis en ligne
+IT-elvetica-pulizia.ch	dépôt italien — non mis en ligne
+IT-elvetica-matrimonio.ch	dépôt italien — non mis en ligne
+IT-elvetica-riscaldamento.ch	dépôt italien — non mis en ligne
+IT-elvetica-patrimonio.ch	dépôt italien — non mis en ligne
+IT-elvetica-spurgo.ch	dépôt italien — non mis en ligne
+debarasstout	hors périmètre total (debarrass-tout.be)
