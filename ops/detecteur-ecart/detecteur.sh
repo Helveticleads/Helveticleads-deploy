@@ -114,6 +114,10 @@ classer() {
 
   if [ -n "$override" ]; then
     commit_iso="$override"
+  elif [[ "$repo" == PREUVE-* ]]; then
+    # Injections de preuve : pas un vrai dépôt — on fixe un commit synthétique
+    # pour atteindre le contrôle HTTP (cœur de la preuve).
+    commit_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   else
     commit_iso=$(dernier_commit_main "$repo") || commit_iso=""
   fi
