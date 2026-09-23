@@ -234,29 +234,42 @@ n_manuels=0
 for p in "${SITES_PUB[@]}"; do
   [ "$p" = "manuelle" ] && n_manuels=$((n_manuels+1))
 done
+# Flotte figée AVANT tout ciblage — sert de M pour la couverture et le verdict.
+n_flotte=$n_mesurables
+n_manuels_flotte=$n_manuels
+passage_cible=0
+cible_label=""
 
 # Ajout temporaire pour preuve dénominateur (M change) — avant UNIQUEMENT
 # pour que le dénominateur reflète la flotte + 1.
 if [ -n "${DETECTEUR_AJOUT_PREUVE:-}" ]; then
   charger_ligne_site "PREUVE-ajout-denom" "domaine-qui-nexiste-pas-hl-detecteur.test" "auto"
   n_mesurables=${#SITES_REPO[@]}
+  n_flotte=$n_mesurables
   M_declares=$((n_mesurables + n_exclus))
   log "AJOUT_PREUVE → M=$M_declares (mesurables=$n_mesurables)"
 fi
 
-# Surcharge de preuve : une seule paire repo|domaine (fermeture d'issue saine).
-# M_declares et n_exclus restent ceux de la flotte (dénominateur stable).
+# Passage ciblé (mise au point uniquement). Interdit sur schedule.
+# Un ciblage ne modifie PAS n_flotte / n_manuels_flotte / M_declares.
 if [ -n "${DETECTEUR_UNIQUEMENT:-}" ]; then
+  event_name="${DETECTEUR_EVENT_NAME:-${GITHUB_EVENT_NAME:-}}"
+  if [ "$event_name" = "schedule" ]; then
+    log "ERREUR : DETECTEUR_UNIQUEMENT interdit sur un passage planifié (schedule)."
+    exit 3
+  fi
+  passage_cible=1
+  cible_label="$DETECTEUR_UNIQUEMENT"
   SITES_REPO=("${DETECTEUR_UNIQUEMENT%%|*}")
   SITES_DOMAIN=("${DETECTEUR_UNIQUEMENT#*|}")
   SITES_PUB=("auto")
   n_mesurables=1
-  n_manuels=0
-  log "UNIQUEMENT=${DETECTEUR_UNIQUEMENT} (preuve fermeture ; M déclaré inchangé=$M_declares)"
+  # n_manuels_flotte et n_flotte INTENTIONNELLEMENT inchangés
+  log "UNIQUEMENT=$DETECTEUR_UNIQUEMENT (ciblé ; flotte M=$M_declares n_flotte=$n_flotte manuels_flotte=$n_manuels_flotte)"
 fi
 
-log "=== Détecteur d'écart — mode=$MODE ==="
-log "Déclarés M=$M_declares (mesurables flotte=$n_mesurables + exclus=$n_exclus, manuels=$n_manuels)"
+log "=== Détecteur d'écart — mode=$MODE cible=$passage_cible ==="
+log "Déclarés M=$M_declares (flotte mesurable=$n_flotte + exclus=$n_exclus, manuels_flotte=$n_manuels_flotte)"
 if [ -n "$M_precedent" ] && [ "$M_precedent" != "$M_declares" ]; then
   log "M a changé : précédent=$M_precedent → actuel=$M_declares"
 fi
@@ -283,9 +296,9 @@ fi
 
 N_mesures=$((n_a_jour + n_en_retard + n_non_mesure))
 # En mode preuve / uniquement / ajout, N_mesures peut différer de la flotte fixe.
-if [ "$MODE" != "preuve" ] && [ -z "${DETECTEUR_UNIQUEMENT:-}" ] && [ -z "${DETECTEUR_AJOUT_PREUVE:-}" ]; then
-  if [ "$N_mesures" -ne "$n_mesurables" ]; then
-    log "ERREUR dénominateur : mesurés($N_mesures) ≠ mesurables($n_mesurables)"
+if [ "$MODE" != "preuve" ] && [ "$passage_cible" -eq 0 ] && [ -z "${DETECTEUR_AJOUT_PREUVE:-}" ]; then
+  if [ "$N_mesures" -ne "$n_flotte" ]; then
+    log "ERREUR dénominateur : mesurés($N_mesures) ≠ flotte($n_flotte)"
     exit 2
   fi
   if [ "$((N_mesures + n_exclus))" -ne "$M_declares" ]; then
@@ -294,16 +307,48 @@ if [ "$MODE" != "preuve" ] && [ -z "${DETECTEUR_UNIQUEMENT:-}" ] && [ -z "${DETE
   fi
 fi
 
+# Garde de verdict :
+#   M_couverture = n_flotte (sites à mesurer). N == M_couverture ⇔ balayage complet.
+#   « Tout à jour » seulement si N == M_couverture ET Y == 0 ET retard == 0
+#   ET pas ciblé ET pas d'échec auth. Sinon aucune phrase rassurante, issue ouverte.
+couverture_complete=0
+if [ "$passage_cible" -eq 0 ] && [ "$N_mesures" -eq "$n_flotte" ]; then
+  couverture_complete=1
+fi
+peut_fermer=0
+verdict="incomplet"
+if [ "$passage_cible" -eq 1 ]; then
+  verdict="cible"
+elif [ -n "$AUTH_FAIL" ]; then
+  verdict="auth"
+elif [ "$couverture_complete" -ne 1 ]; then
+  verdict="incomplet"
+elif [ "$n_non_mesure" -gt 0 ]; then
+  verdict="non_mesure"
+elif [ "$n_en_retard" -gt 0 ]; then
+  verdict="retard"
+elif [ "$n_a_jour" -eq "$N_mesures" ]; then
+  verdict="a_jour"
+  peut_fermer=1
+else
+  verdict="incomplet"
+fi
+
 {
   echo "M_declares=$M_declares"
   echo "N_mesures=$N_mesures"
+  echo "n_flotte=$n_flotte"
   echo "n_mesurables=$n_mesurables"
   echo "n_exclus=$n_exclus"
-  echo "n_manuels=$n_manuels"
+  echo "n_manuels=$n_manuels_flotte"
   echo "n_a_jour=$n_a_jour"
   echo "n_en_retard=$n_en_retard"
   echo "n_non_mesure=$n_non_mesure"
   echo "mode=$MODE"
+  echo "passage_cible=$passage_cible"
+  echo "couverture_complete=$couverture_complete"
+  echo "peut_fermer=$peut_fermer"
+  echo "verdict=$verdict"
   echo "auth_fail=${AUTH_FAIL:-non}"
   echo "jeton_expire=$JETON_EXPIRE_LE"
   echo "generated_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -339,6 +384,10 @@ markdown_table() {
 
 BODY_FILE="$RESULT_DIR/issue-body.md"
 {
+  # PREMIÈRE ligne du rapport : le ratio N/M — avant tout le reste.
+  echo "**N/M** : **$N_mesures**/**$n_flotte**"
+  echo
+
   if [ -n "$AUTH_FAIL" ]; then
     echo "> [!CAUTION]"
     echo "> **ÉCHEC D'AUTHENTIFICATION — le détecteur ne voit plus rien.**"
@@ -347,30 +396,68 @@ BODY_FILE="$RESULT_DIR/issue-body.md"
     echo "> Un zéro « à jour » sans vision serait exactement le défaut que ce détecteur doit supprimer."
     echo
   fi
-  echo "## Rapport du détecteur d'écart"
-  echo
-  echo "Généré : \`$(date -u +"%Y-%m-%dT%H:%M:%SZ")\` · mode : \`$MODE\` · tolérance : 2 h"
-  echo
-  echo "**Jeton** \`JETON_LECTURE_DEPOTS\` : expire le **$JETON_EXPIRE_LE** (Contents lecture seule, All repositories)."
-  echo
-  # Exigence B : chaque passage porte son dénominateur, avec Y non mesurés.
-  echo "**Dénominateur** : **$N_mesures** mesurés sur **$M_declares** déclarés, dont **$n_exclus** exclus et **$n_non_mesure** non mesurés."
-  echo
-  echo "Flotte déclarée : $((M_declares - n_exclus)) sites + $n_exclus exclus = **$M_declares**. Publication manuelle : $n_manuels. Lignes classées ce passage : $N_mesures (à jour $n_a_jour · retard $n_en_retard · non mesuré $n_non_mesure)."
-  if [ -n "$M_precedent" ] && [ "$M_precedent" != "$M_declares" ]; then
+
+  if [ "$passage_cible" -eq 1 ]; then
+    echo "## PASSAGE CIBLÉ — pas un balayage complet"
     echo
+    echo "**Cible** : \`$cible_label\`"
+    echo
+    echo "> Ce rapport ne porte **aucune conclusion** de flotte et **ne ferme pas** l'issue."
+    echo
+  else
+    echo "## Rapport du détecteur d'écart"
+    echo
+  fi
+
+  echo "Déclarés totaux : **$M_declares** (= $n_flotte mesurables + $n_exclus exclus). Dont **$n_non_mesure** non mesurés (Y). Publication manuelle : **$n_manuels_flotte**."
+  echo
+  echo "Généré : \`$(date -u +"%Y-%m-%dT%H:%M:%SZ")\` · mode : \`$MODE\` · tolérance : 2 h · jeton expire le **$JETON_EXPIRE_LE**"
+  echo
+  case "$verdict" in
+    a_jour)
+      echo "**Verdict** : tout à jour — N/M complet ($N_mesures/$n_flotte), Y = 0, aucun retard."
+      ;;
+    cible)
+      echo "**Verdict** : passage ciblé — aucune conclusion flotte."
+      ;;
+    auth)
+      echo "**Verdict** : authentification en échec — issue ouverte, aucun « tout à jour »."
+      ;;
+    incomplet)
+      echo "**Verdict** : passage incomplet (N < M : $N_mesures < $n_flotte) — aucune conclusion rassurante, issue ouverte."
+      ;;
+    non_mesure)
+      echo "**Verdict** : Y = $n_non_mesure non mesuré(s) — issue ouverte."
+      ;;
+    retard)
+      echo "**Verdict** : $n_en_retard site(s) en retard — issue ouverte."
+      ;;
+    *)
+      echo "**Verdict** : état non rassurant (verdict=$verdict) — issue ouverte."
+      ;;
+  esac
+  echo
+  if [ -n "$M_precedent" ] && [ "$M_precedent" != "$M_declares" ]; then
     echo "> **M a changé** entre deux passages : $M_precedent → $M_declares."
+    echo
   fi
   if [ "$MODE" = "preuve" ]; then
-    echo
     echo "_Mode preuve : injections domaine inexistant / sans Last-Modified / écart fabriqué incluses._"
-  fi
-  if [ -n "${DETECTEUR_UNIQUEMENT:-}" ]; then
     echo
-    echo "_Passage ciblé (\`DETECTEUR_UNIQUEMENT\`) : le dénominateur M reste celui de la flotte complète._"
   fi
+  echo "Répartition ce passage : **$n_en_retard** en retard · **$n_non_mesure** non mesurés · **$n_a_jour** à jour"
   echo
-  echo "Répartition : **$n_en_retard** en retard · **$n_non_mesure** non mesurés · **$n_a_jour** à jour"
+  echo "<details><summary>Publication manuelle ($n_manuels_flotte) — aucun automatisme de rattrapage</summary>"
+  echo
+  echo "| Dépôt | Domaine |"
+  echo "|---|---|"
+  while IFS='|' read -r repo domain _source pub _rest || [ -n "${repo:-}" ]; do
+    [[ -z "${repo:-}" || "$repo" =~ ^# ]] && continue
+    [ "${pub:-}" = "manuelle" ] || continue
+    printf '| %s | %s |\n' "$repo" "$domain"
+  done < "$DIR/sites-declares.txt"
+  echo
+  echo "</details>"
   echo
   echo "<details><summary>Exclusions ($n_exclus) — jamais classées EN RETARD</summary>"
   echo
@@ -389,13 +476,13 @@ BODY_FILE="$RESULT_DIR/issue-body.md"
   echo
   echo "_Mesure = date Last-Modified du HTML servi + empreinte sha256[0:12] du corps. Pas de marqueur circulaire DEPLOY_COMMIT._"
   echo
-  echo "_Un site non mesuré n'est jamais classé à jour. Absence de signal ≠ absence de problème._"
+  echo "_Un site non mesuré n'est jamais classé à jour. N < M ou Y > 0 ⇒ pas de clôture._"
 } > "$BODY_FILE"
 
 # Mode dry-run : pas d'upsert issue (preuves locales / sabotage auth hors Actions issues).
 if [ "${DETECTEUR_DRY_RUN:-0}" = "1" ]; then
   echo "DRY_RUN" > "$RESULT_DIR/issue-url.txt"
-  log "DONE dry-run M=$M_declares N=$N_mesures X=$n_exclus Y=$n_non_mesure a_jour=$n_a_jour en_retard=$n_en_retard auth=${AUTH_FAIL:-ok}"
+  log "DONE dry-run N/M=$N_mesures/$n_flotte M=$M_declares Y=$n_non_mesure verdict=$verdict peut_fermer=$peut_fermer cible=$passage_cible auth=${AUTH_FAIL:-ok}"
   exit 0
 fi
 
@@ -409,16 +496,37 @@ EXISTING=$(gh_issue issue list -R "$REPO_DEPLOY" --state all --limit 50 \
   --json number,title,state,url \
   --jq "[.[] | select(.title == \"$ISSUE_TITLE\")] | .[0] // empty")
 
-# Sain = rien en retard, rien de non mesuré, ET pas d'échec auth
-sain=0
-if [ -z "$AUTH_FAIL" ] && [ "$n_en_retard" -eq 0 ] && [ "$n_non_mesure" -eq 0 ]; then
-  sain=1
-fi
-
 upsert_body() {
   local num="$1"
   gh_issue issue edit "$num" -R "$REPO_DEPLOY" --body-file "$BODY_FILE"
 }
+
+# Passage ciblé : met à jour le corps, ne conclut pas, ne ferme jamais.
+if [ "$passage_cible" -eq 1 ]; then
+  if [ -z "$EXISTING" ]; then
+    URL=$(gh_issue issue create -R "$REPO_DEPLOY" \
+      --title "$ISSUE_TITLE" \
+      --label "$ISSUE_LABEL" \
+      --body-file "$BODY_FILE")
+    log "Issue créée (ouverte, passage ciblé sans conclusion) : $URL"
+  else
+    NUM=$(printf '%s' "$EXISTING" | python3 -c 'import sys,json; print(json.load(sys.stdin)["number"])')
+    STATE=$(printf '%s' "$EXISTING" | python3 -c 'import sys,json; print(json.load(sys.stdin)["state"])')
+    URL=$(printf '%s' "$EXISTING" | python3 -c 'import sys,json; print(json.load(sys.stdin)["url"])')
+    upsert_body "$NUM"
+    if [ "$STATE" = "CLOSED" ]; then
+      gh_issue issue reopen "$NUM" -R "$REPO_DEPLOY" \
+        --comment "Passage ciblé (\`$cible_label\`) — rouverture, aucune conclusion flotte."
+      log "Issue rouverte (passage ciblé) : $URL"
+    else
+      log "Issue mise à jour (ouverte, passage ciblé, pas de conclusion) : $URL"
+    fi
+  fi
+  echo "$URL" > "$RESULT_DIR/issue-url.txt"
+  echo "$M_declares" > "$RESULT_DIR/M_declares.txt"
+  log "DONE issue=$URL N/M=$N_mesures/$n_flotte verdict=cible peut_fermer=0"
+  exit 0
+fi
 
 if [ -z "$EXISTING" ]; then
   URL=$(gh_issue issue create -R "$REPO_DEPLOY" \
@@ -426,37 +534,38 @@ if [ -z "$EXISTING" ]; then
     --label "$ISSUE_LABEL" \
     --body-file "$BODY_FILE")
   NUM=$(printf '%s' "$URL" | grep -oE '[0-9]+$')
-  if [ "$sain" -eq 1 ]; then
+  if [ "$peut_fermer" -eq 1 ]; then
     gh_issue issue close "$NUM" -R "$REPO_DEPLOY" \
-      --comment "Tout à jour, rien de non mesuré — détecteur opérationnel."
+      --comment "Tout à jour — N/M=$N_mesures/$n_flotte, Y=0."
     log "Issue créée puis fermée : $URL"
   else
-    log "Issue créée (ouverte) : $URL"
+    log "Issue créée (ouverte, verdict=$verdict) : $URL"
   fi
 else
   NUM=$(printf '%s' "$EXISTING" | python3 -c 'import sys,json; print(json.load(sys.stdin)["number"])')
   STATE=$(printf '%s' "$EXISTING" | python3 -c 'import sys,json; print(json.load(sys.stdin)["state"])')
   URL=$(printf '%s' "$EXISTING" | python3 -c 'import sys,json; print(json.load(sys.stdin)["url"])')
   upsert_body "$NUM"
-  if [ "$sain" -eq 1 ]; then
+  if [ "$peut_fermer" -eq 1 ]; then
     if [ "$STATE" = "OPEN" ]; then
       gh_issue issue close "$NUM" -R "$REPO_DEPLOY" \
-        --comment "Tout à jour, rien de non mesuré — détecteur opérationnel."
+        --comment "Tout à jour — N/M=$N_mesures/$n_flotte, Y=0."
       log "Issue mise à jour et fermée : $URL"
     else
       log "Issue déjà fermée, corps mis à jour : $URL"
     fi
   else
+    # N < M, Y > 0, retard, ou auth : DOIT rester / être ouverte. Jamais de phrase rassurante.
     if [ "$STATE" = "CLOSED" ]; then
-      gh_issue issue reopen "$NUM" -R "$REPO_DEPLOY"
+      gh_issue issue reopen "$NUM" -R "$REPO_DEPLOY" \
+        --comment "Rouverture — verdict=$verdict (N/M=$N_mesures/$n_flotte, Y=$n_non_mesure)."
       log "Issue rouverte : $URL"
     else
-      log "Issue mise à jour (ouverte) : $URL"
+      log "Issue mise à jour (ouverte, verdict=$verdict) : $URL"
     fi
   fi
 fi
 
 echo "$URL" > "$RESULT_DIR/issue-url.txt"
-# Persister M pour le prochain passage (changement de dénominateur).
 echo "$M_declares" > "$RESULT_DIR/M_declares.txt"
-log "DONE issue=$URL M=$M_declares N=$N_mesures X=$n_exclus Y=$n_non_mesure a_jour=$n_a_jour en_retard=$n_en_retard auth=${AUTH_FAIL:-ok} jeton_expire=$JETON_EXPIRE_LE"
+log "DONE issue=$URL N/M=$N_mesures/$n_flotte M=$M_declares Y=$n_non_mesure verdict=$verdict peut_fermer=$peut_fermer auth=${AUTH_FAIL:-ok}"
