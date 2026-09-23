@@ -1,0 +1,46 @@
+# Preuves du verrou par hôte (FS local) — aucun déploiement.
+name: Preuve verrou par hote
+
+on:
+  push:
+    branches: [feat/verrou-par-hote]
+    paths:
+      - "ops/verrou-hote/**"
+      - ".github/workflows/deploy-infomaniak.yml"
+      - ".github/workflows/deploy-vite-standalone.yml"
+      - ".github/workflows/preuve-verrou-hote.yml"
+  pull_request:
+    paths:
+      - "ops/verrou-hote/**"
+      - ".github/workflows/deploy-infomaniak.yml"
+      - ".github/workflows/deploy-vite-standalone.yml"
+      - ".github/workflows/preuve-verrou-hote.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preuves:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Couverture (dénominateur)
+        run: |
+          echo "40 sites couverts / 56 mesurables (4 hôtes)."
+          echo "16 rsync manuels NON couverts — collision possible hors verrou."
+      - name: Harness preuves
+        run: |
+          chmod +x ops/verrou-hote/*.sh
+          bash ops/verrou-hote/preuves.sh
+      - name: Scripts embarqués dans les workflows
+        run: |
+          # Les workflows doivent contenir le mkdir path et les marqueurs de log.
+          for f in .github/workflows/deploy-infomaniak.yml .github/workflows/deploy-vite-standalone.yml; do
+            grep -q 'helveticleads-deploy-lock' "$f"
+            grep -q 'LOCK_STALE_RECLAIM\|STALE_SEC=1500' "$f"
+            grep -q 'Prendre verrou hôte' "$f"
+            grep -q 'Relâcher verrou hôte' "$f"
+            grep -q '40/56' "$f"
+            echo "OK $f"
+          done
