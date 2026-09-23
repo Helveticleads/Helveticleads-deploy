@@ -1,0 +1,59 @@
+# Détecteur d'écart entre ce qui est fusionné (main) et ce qui est servi
+# (Last-Modified HTTP). Ne publie rien. Ne répare rien.
+name: Detecteur ecart fusionne servi
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "normal = flotte réelle · preuve = injecte domaine inexistant / sans LM / écart fabriqué"
+        type: choice
+        options: [normal, preuve]
+        default: normal
+  # Permet de prouver sur la branche avant fusion (workflow_dispatch invisible hors main).
+  push:
+    branches: [ops/detecteur-ecart]
+    paths:
+      - "ops/detecteur-ecart/**"
+      - ".github/workflows/detecteur-ecart.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  detecter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Détecter les écarts
+        env:
+          JETON_LECTURE_DEPOTS: ${{ secrets.JETON_LECTURE_DEPOTS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DETECTEUR_MODE: ${{ github.event.inputs.mode || 'normal' }}
+        run: |
+          set -euo pipefail
+          # Sur push hors workflow_dispatch, forcer preuve une fois pour les tests
+          # de branche : si l'événement est push et le message contient [preuve],
+          # basculer. Sinon normal.
+          if [ "${{ github.event_name }}" = "push" ] && echo "${{ github.event.head_commit.message }}" | grep -q '\[preuve\]'; then
+            export DETECTEUR_MODE=preuve
+          fi
+          chmod +x ops/detecteur-ecart/detecteur.sh
+          bash ops/detecteur-ecart/detecteur.sh
+
+      - name: Afficher le résumé
+        if: always()
+        run: |
+          echo "=== meta ==="
+          cat .detecteur-out/meta.txt 2>/dev/null || true
+          echo "=== issue ==="
+          cat .detecteur-out/issue-url.txt 2>/dev/null || true
+          echo "=== en retard ==="
+          cat .detecteur-out/en-retard.tsv 2>/dev/null || true
+          echo "=== non mesuré (extrait) ==="
+          head -30 .detecteur-out/non-mesure.tsv 2>/dev/null || true

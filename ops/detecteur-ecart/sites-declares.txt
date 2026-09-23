@@ -1,0 +1,23 @@
+# Sites SANS deploy.yml : domaine établi depuis le code du dépôt, puis
+# vérifié par HTTP 200 sur https://<domaine>/ (2026-09-23). Jamais déduit
+# du seul nom du dépôt. Format : dépôt|domaine|source
+#
+# Un dépôt dont le domaine ne peut pas être établi entre avec la mention
+# « domaine inconnu » et compte NON MESURÉ (aucune ligne ici dans ce cas).
+
+DE-helvetic-schluesseldienst.ch|helvetic-schluesseldienst.ch|artifacts/.../brand.ts domain + HTTP 200
+DE-helvetic-sanitaer.ch|helvetic-sanitaer.ch|artifacts/helvetisch-sanitaer/src/data/config.ts domain + HTTP 200
+DE-helvetic-daemmung.ch|helvetic-daemmung.ch|artifacts/helvetic-daemmung/src/data/brand.ts domain + HTTP 200
+DE-helvetic-dachdecker.ch|helvetic-dachdecker.ch|artifacts/.../config-de.ts domain + HTTP 200
+DE-helvetic-kaminfeger.ch|helvetic-kaminfeger.ch|artifacts/.../config.ts domain + HTTP 200
+DE-helvetic-rohrreinigung.ch|helvetic-rohrreinigung.ch|artifacts/.../de/config.ts siteUrl + HTTP 200
+DE-helvetic-glaserei.ch|helvetic-glaserei.ch|artifacts/.../brand.de.ts domain + HTTP 200
+DE-helvetic-elektriker.ch|helvetic-elektriker.ch|artifacts/.../config/site.ts domain + HTTP 200
+DE-helvetic-heizung.ch|helvetic-heizung.ch|artifacts/.../brand.ts domain + HTTP 200
+FR-domisane-suisse.ch|domisane-suisse.ch|lib/seo/config.ts SITE.url + HTTP 200
+FR-helvetique-web.ch|helvetique-web.ch|deploy/nginx server_name + HTTP 200
+FR-monjardiniersuisse.ch|monjardiniersuisse.ch|index.html canonical + HTTP 200
+FR-monexterminateursuisse.ch|monexterminateursuisse.ch|index.html url + HTTP 200
+FR-nuisibles-suisse.ch|nuisibles-suisse.ch|astro.config.mjs site + HTTP 200
+DE-schaedlinge-schweiz.ch|schaedlinge-schweiz.ch|astro.config.mjs site + HTTP 200
+DE-hausana-schweiz.ch|hausana-schweiz.ch|lib/seo/config.ts SITE.url + HTTP 200

@@ -1,0 +1,44 @@
+# Sites découverts via domain: dans .github/workflows/deploy.yml (lecture auto).
+# Format : dépôt|domaine
+# Généré / vérifié le 2026-09-23. Ne pas y mettre les exclus ni les déclarés manuels.
+
+FR-helvetique-vitrerie.ch|helvetique-vitrerie.ch
+FR-helvetique-toiture.ch|helvetique-toiture.ch
+FR-helvetique-terrassement.ch|helvetique-terrassement.ch
+FR-helvetique-serrurerie.ch|helvetique-serrurerie.ch
+FR-helvetique-renovation-interieure.ch|helvetique-renovation-interieure.ch
+FR-helvetique-renovation-exterieure.ch|helvetique-renovation-exterieure.ch
+FR-helvetique-ramonage.ch|helvetique-ramonage.ch
+FR-helvetique-plomberie.ch|helvetique-plomberie.ch
+FR-helvetique-plaquiste.ch|helvetique-plaquiste.ch
+FR-helvetique-panneau-solaire.ch|helvetique-panneau-solaire.ch
+FR-helvetique-menuiserie.ch|helvetique-menuiserie.ch
+FR-helvetique-maconnerie.ch|helvetique-maconnerie.ch
+FR-helvetique-isolation.ch|helvetique-isolation.ch
+FR-helvetique-ia.ch|helvetique-ia.ch
+FR-helvetique-ferronnerie.ch|helvetique-ferronnerie.ch
+FR-helvetique-electricite.ch|helvetique-electricite.ch
+FR-helvetique-dentaire.ch|helvetique-dentaire.ch
+FR-helvetique-chauffage.ch|helvetique-chauffage.ch
+FR-helvetique-carrelage.ch|helvetique-carrelage.ch
+FR-helvetique-assainissement.ch|helvetique-assainissement.ch
+FR-helvetique-demenagements.ch|helvetique-demenagements.ch
+FR-helvetique-evenementiel.ch|helvetique-evenementiel.ch
+FR-helvetique-elagage.ch|helvetique-elagage.ch
+FR-helvetique-nuisibles.ch|helvetique-nuisibles.ch
+FR-helvetique-peinture.ch|helvetique-peinture.ch
+FR-helvetique-piscine.ch|helvetique-piscine.ch
+FR-helvetique-jardin.ch|helvetique-jardin.ch
+FR-helvetique-rongeurs.ch|helvetique-rongeurs.ch
+DE-helvetic-schaedlinge.ch|helvetic-schaedlinge.ch
+FR-helvetique-spa.ch|helvetique-spa.ch
+DE-helvetic-whirlpool.ch|helvetic-whirlpool.ch
+DE-helvetic-vermoegen.ch|helvetic-vermoegen.ch
+DE-helvetic-reinigung.ch|helvetic-reinigung.ch
+DE-helvetic-pool.ch|helvetic-pool.ch
+DE-helvetic-garten.ch|helvetic-garten.ch
+DE-helvetic-malerei.ch|helvetic-malerei.ch
+DE-helvetic-hochzeit.ch|helvetic-hochzeit.ch
+FR-helvetique-mariage.ch|helvetique-mariage.ch
+FR-helvetique-nettoyage.ch|helvetique-nettoyage.ch
+FR-helvetique-patrimoine.ch|helvetique-patrimoine.ch
