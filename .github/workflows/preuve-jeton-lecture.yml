@@ -1,0 +1,28 @@
+# Preuve minimale : le secret JETON_LECTURE_DEPOTS lit-il un autre dépôt ?
+# Ne déploie rien. Ne lit jamais la valeur du secret hors Actions.
+name: Preuve jeton lecture depots
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/detecteur-ecart]
+    paths: [.github/workflows/preuve-jeton-lecture.yml]
+
+jobs:
+  preuve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lire un commit d'un autre dépôt
+        env:
+          GH_TOKEN: ${{ secrets.JETON_LECTURE_DEPOTS }}
+        run: |
+          set -euo pipefail
+          echo "=== Qui suis-je ? ==="
+          gh api user --jq '{login, type}' || { echo "AUTH_FAIL user"; exit 1; }
+          echo "=== Contenu lisible ? (FR-helvetique-toiture.ch /commits/main) ==="
+          gh api repos/Helveticleads/FR-helvetique-toiture.ch/commits/main \
+            --jq '{sha: .sha[0:12], date: .commit.committer.date, message: (.commit.message | split("\n")[0])}'
+          echo "=== deploy.yml domain ==="
+          gh api repos/Helveticleads/FR-helvetique-toiture.ch/contents/.github/workflows/deploy.yml \
+            --jq '.content' | base64 -d | sed -nE 's/^[[:space:]]+(domain|host):[[:space:]]*//p' | head -5
+          echo "JETON_OK expire_attendu=2027-09-23"

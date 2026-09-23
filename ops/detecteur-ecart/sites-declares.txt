@@ -1,0 +1,27 @@
+# Sites SANS deploy.yml : domaine établi depuis le code du dépôt, puis
+# vérifié par HTTP 200 sur https://<domaine>/ (2026-09-23). Jamais déduit
+# du seul nom du dépôt.
+# Format : dépôt|domaine|source|publication
+#   publication = manuelle  → aucun automatisme de déploiement (rsync / script local)
+#   publication = autre     → CI locale ou chemin hors deploy.yml partagé
+#
+# Re-vérifié 2026-09-23 : les 16 déclarés sont TOUS sans deploy.yml
+# (le chiffre « 11 » du brief désigne le sous-ensemble rsync Hetzner DE +
+# schaedlinge + web ; les 5 autres n'ont pas non plus de deploy.yml).
+
+DE-helvetic-schluesseldienst.ch|helvetic-schluesseldienst.ch|artifacts/.../brand.ts domain + HTTP 200|manuelle
+DE-helvetic-sanitaer.ch|helvetic-sanitaer.ch|artifacts/helvetisch-sanitaer/src/data/config.ts domain + HTTP 200|manuelle
+DE-helvetic-daemmung.ch|helvetic-daemmung.ch|artifacts/helvetic-daemmung/src/data/brand.ts domain + HTTP 200|manuelle
+DE-helvetic-dachdecker.ch|helvetic-dachdecker.ch|artifacts/.../config-de.ts domain + HTTP 200|manuelle
+DE-helvetic-kaminfeger.ch|helvetic-kaminfeger.ch|artifacts/.../config.ts domain + HTTP 200|manuelle
+DE-helvetic-rohrreinigung.ch|helvetic-rohrreinigung.ch|artifacts/.../de/config.ts siteUrl + HTTP 200|manuelle
+DE-helvetic-glaserei.ch|helvetic-glaserei.ch|artifacts/.../brand.de.ts domain + HTTP 200|manuelle
+DE-helvetic-elektriker.ch|helvetic-elektriker.ch|artifacts/.../config/site.ts domain + HTTP 200|manuelle
+DE-helvetic-heizung.ch|helvetic-heizung.ch|artifacts/.../brand.ts domain + HTTP 200|manuelle
+FR-domisane-suisse.ch|domisane-suisse.ch|lib/seo/config.ts SITE.url + HTTP 200|manuelle
+FR-helvetique-web.ch|helvetique-web.ch|deploy/nginx server_name + HTTP 200|manuelle
+FR-monjardiniersuisse.ch|monjardiniersuisse.ch|index.html canonical + HTTP 200|manuelle
+FR-monexterminateursuisse.ch|monexterminateursuisse.ch|index.html url + HTTP 200|manuelle
+FR-nuisibles-suisse.ch|nuisibles-suisse.ch|astro.config.mjs site + HTTP 200|manuelle
+DE-schaedlinge-schweiz.ch|schaedlinge-schweiz.ch|astro.config.mjs site + HTTP 200|manuelle
+DE-hausana-schweiz.ch|hausana-schweiz.ch|lib/seo/config.ts SITE.url + HTTP 200|manuelle
