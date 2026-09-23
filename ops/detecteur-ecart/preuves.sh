@@ -222,21 +222,60 @@ preuve_13_nm_tete() {
   ok "$grade" "preuve 13 — N/M est la ligne 1 du rapport"
 }
 
-# --- Preuve 14 : limite « empreinte comparée à rien » au pied ---
+# --- Preuve 14 : limite écrite au pied ---
 preuve_14_limite() {
   local grade=1
   need_token
   JETON_LECTURE_DEPOTS="" DETECTEUR_MODE=normal run_dry p14 env
-  grep -q "empreinte HTML est relevée mais comparée à rien" "$OUT/p14/issue-body.md" \
+  grep -q "Limite (sites datés)" "$OUT/p14/issue-body.md" \
     || ko "$grade" "phrase de limite absente du pied"
-  grep -q "Absence de signal ≠ absence de problème\|Absence de signal" "$OUT/p14/issue-body.md" \
-    || ko "$grade" "phrase absence de signal absente"
-  # La limite doit apparaître après les tableaux (ou en bas) — au moins après N/M
-  local lim nm
-  lim=$(grep -n 'comparée à rien' "$OUT/p14/issue-body.md" | head -1 | cut -d: -f1)
-  nm=$(grep -n '^\*\*N/M\*\*' "$OUT/p14/issue-body.md" | head -1 | cut -d: -f1)
-  [ "$lim" -gt "$nm" ] || ko "$grade" "limite pas après N/M"
-  ok "$grade" "preuve 14 — limite empreinte écrite au pied du rapport"
+  grep -q "DETECTEUR_EMPREINTES_V1" "$OUT/p14/issue-body.md" \
+    || ko "$grade" "bloc persistance empreintes absent"
+  ok "$grade" "preuve 14 — limite + bloc persistance présents"
+}
+
+# --- Preuve 15 : sans Last-Modified → SUIVI PAR EMPREINTE (pas À JOUR / EN RETARD) ---
+preuve_15_suivi_empreinte() {
+  local grade=1
+  need_token
+  run_dry p15 env DETECTEUR_UNIQUEMENT="FR-domisane-suisse.ch|domisane-suisse.ch"
+  grep -q 'n_suivi=1' "$OUT/p15/meta.txt" || ko "$grade" "domisane pas en suivi (meta=$(grep n_ "$OUT/p15/meta.txt"))"
+  grep -q 'domisane-suisse.ch' "$OUT/p15/suivi-empreinte.tsv" || ko "$grade" "absent de suivi-empreinte.tsv"
+  grep -q 'première observation' "$OUT/p15/suivi-empreinte.tsv" || ko "$grade" "pas de première observation"
+  grep -qi 'ne compare pas à main\|ne compare rien à' "$OUT/p15/issue-body.md" \
+    || ko "$grade" "phrase « ne compare pas à main » absente"
+  grep -qi 'cache de 24 h\|s-maxage=86400' "$OUT/p15/suivi-empreinte.tsv" "$OUT/p15/issue-body.md" \
+    || ko "$grade" "mention cache 24 h absente"
+  if grep -q 'domisane' "$OUT/p15/a-jour.tsv" 2>/dev/null; then
+    ko "$grade" "domisane indûment A_JOUR"
+  fi
+  if grep -q 'domisane' "$OUT/p15/en-retard.tsv" 2>/dev/null; then
+    ko "$grade" "domisane indûment EN_RETARD"
+  fi
+  grep -q 'peut_fermer=0' "$OUT/p15/meta.txt" || ko "$grade" "suivi ne doit pas permettre de fermer"
+  ok "$grade" "preuve 15 — SUIVI PAR EMPREINTE + cache 24 h + ne compare pas à main"
+}
+
+# --- Preuve 16 : empreinte inchangée / changée (sabotage PREV) ---
+preuve_16_empreinte_delta() {
+  local grade=2
+  need_token
+  local prev="$OUT/prev-emp.txt"
+  # Hash réel actuel de domisane
+  local real
+  real=$(curl -sL --max-time 15 "https://domisane-suisse.ch/" | shasum -a 256 | awk '{print substr($1,1,12)}')
+  printf 'domisane-suisse.ch %s 2026-09-01T00:00:00Z cache\n' "$real" > "$prev"
+  DETECTEUR_EMPREINTES_PREV="$prev" \
+    run_dry p16a env DETECTEUR_UNIQUEMENT="FR-domisane-suisse.ch|domisane-suisse.ch"
+  grep -q 'inchangé depuis le 2026-09-01' "$OUT/p16a/suivi-empreinte.tsv" \
+    || ko "$grade" "attendu inchangé (got $(cat "$OUT/p16a/suivi-empreinte.tsv"))"
+  # Sabotage : hash précédent faux → a changé
+  printf 'domisane-suisse.ch deadbeefdead 2026-09-01T00:00:00Z cache\n' > "$prev"
+  DETECTEUR_EMPREINTES_PREV="$prev" \
+    run_dry p16b env DETECTEUR_UNIQUEMENT="FR-domisane-suisse.ch|domisane-suisse.ch"
+  grep -q 'a changé le ' "$OUT/p16b/suivi-empreinte.tsv" \
+    || ko "$grade" "attendu a changé (got $(cat "$OUT/p16b/suivi-empreinte.tsv"))"
+  ok "$grade" "preuve 16 — inchangé / a changé selon PREV (sabotage hash)"
 }
 
 echo "=== Preuves détecteur d'écart ==="
@@ -254,6 +293,8 @@ preuve_11_cible
 preuve_12_manuels
 preuve_13_nm_tete
 preuve_14_limite
+preuve_15_suivi_empreinte
+preuve_16_empreinte_delta
 
 echo
 echo "RESULT pass=$pass fail=$fail"

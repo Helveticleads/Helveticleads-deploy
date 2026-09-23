@@ -3,14 +3,19 @@
 # Empreinte (sha256) du corps servi : preuve d'observation réelle — jamais un
 # marqueur DEPLOY_COMMIT écrit par le déploiement lui-même.
 #
-# Trois états — jamais deux :
-#   A_JOUR      page ≥ commit, ou retard < 2 h
-#   EN_RETARD   page antérieure au commit de plus de 2 h
-#   NON_MESURE  muet / sans Last-Modified / dépôt illisible / domaine inconnu
+# États — exclusifs :
+#   A_JOUR              page ≥ commit, ou retard < 2 h (mesure par DATE)
+#   EN_RETARD           page antérieure au commit de plus de 2 h (mesure par DATE)
+#   SUIVI_PAR_EMPREINTE sans Last-Modified : compare l'empreinte à l'observation
+#                       précédente (ne compare PAS à main)
+#   NON_MESURE          muet / dépôt illisible / domaine inconnu
 #
-# NON_MESURE ne bascule JAMAIS en A_JOUR.
+# NON_MESURE et SUIVI_PAR_EMPREINTE ne basculent JAMAIS en A_JOUR.
 # Échec d'auth du jeton (401/403/refus) = TOUS les sites en NON_MESURE,
 # issue OUVERTE, raison en TÊTE. Interdiction de rendre « tout va bien ».
+#
+# Persistance des empreintes : bloc HTML commenté dans le corps de l'issue
+# (pas de commit par passage). Survit à un passage raté = dernière écriture OK.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -20,11 +25,11 @@ REPO_DEPLOY="${DETECTEUR_REPO:-Helveticleads/Helveticleads-deploy}"
 TOLERANCE_SEC=$((2 * 3600))
 ISSUE_TITLE="Écart fusionné ↔ servi"
 ISSUE_LABEL="detecteur-ecart"
-# Expiration connue du fine-grained token (portée Contents lecture seule).
 JETON_EXPIRE_LE="${DETECTEUR_JETON_EXPIRE:-2027-09-23}"
+EMP_MARKER_BEGIN="<!-- DETECTEUR_EMPREINTES_V1"
+EMP_MARKER_END="-->"
 
-MODE="${DETECTEUR_MODE:-normal}"   # normal | preuve
-# Jeton vide = échec d'auth bruyant (pas un abort silencieux) — preuve sabotage.
+MODE="${DETECTEUR_MODE:-normal}"
 GH_READ_TOKEN="${JETON_LECTURE_DEPOTS-}"
 GH_ISSUE_TOKEN="${GITHUB_TOKEN:?GITHUB_TOKEN manquant}"
 
@@ -33,14 +38,17 @@ mkdir -p "$RESULT_DIR"
 : > "$RESULT_DIR/a-jour.tsv"
 : > "$RESULT_DIR/en-retard.tsv"
 : > "$RESULT_DIR/non-mesure.tsv"
+: > "$RESULT_DIR/suivi-empreinte.tsv"
+: > "$RESULT_DIR/empreintes-nouvelles.txt"
+PREV_EMP_FILE="$RESULT_DIR/empreintes-precedentes.txt"
+: > "$PREV_EMP_FILE"
 
-n_a_jour=0; n_en_retard=0; n_non_mesure=0
+n_a_jour=0; n_en_retard=0; n_non_mesure=0; n_suivi=0
 AUTH_FAIL=""
 AUTH_FAIL_DETAIL=""
 M_precedent="${DETECTEUR_M_PRECEDENT:-}"
 
 log() { printf '%s\n' "$*" >&2; }
-
 gh_read()  { GH_TOKEN="$GH_READ_TOKEN"  gh "$@"; }
 gh_issue() { GH_TOKEN="$GH_ISSUE_TOKEN" gh "$@"; }
 
@@ -51,16 +59,13 @@ epoch_of() {
   date -u -j -f "%a, %d %b %Y %H:%M:%S GMT" "$s" +%s 2>/dev/null && return
   return 1
 }
-
 fmt_iso() {
   local e="$1"
   date -u -d "@$e" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -r "$e" +"%Y-%m-%dT%H:%M:%SZ"
 }
-
 ecart_h() { awk -v s="$1" 'BEGIN{printf "%.1f", s/3600}'; }
+now_iso() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 
-# --- auth : échec bruyant ---------------------------------------------------
-# Un 401/403 DOIT hurler. Un jeton vide aussi. Jamais de silence « tout va bien ».
 verifier_jeton() {
   local out rc http
   if [ -z "$GH_READ_TOKEN" ]; then
@@ -93,32 +98,83 @@ dernier_commit_main() {
   gh_read api "repos/$OWNER/$1/commits/main" --jq '.commit.committer.date' 2>/dev/null
 }
 
-# Lit DATE (Last-Modified) + empreinte sha256 du corps servi.
-# Sortie OK (rc 0) : "<epoch_iso_ou_raw>|<sha256_12>"
-# Échecs : INJOIGNABLE / HTTP_xxx / SANS_LAST_MODIFIED
+indice_cache() {
+  local hdr="$1" smax next
+  smax=$(awk -F': ' 'tolower($1)=="cache-control"{print tolower($2)}' "$hdr" \
+    | sed -nE 's/.*s-maxage=([0-9]+).*/\1/p' | head -1)
+  next=$(awk -F': ' 'tolower($1)=="x-nextjs-cache"{print $2; exit}' "$hdr")
+  if [ -n "$smax" ] && [ "$smax" -ge 86400 ] 2>/dev/null; then
+    printf 'empreinte observée derrière un cache de 24 h (s-maxage=%s%s)' \
+      "$smax" "${next:+, nextjs=$next}"
+  elif [ -n "$smax" ] && [ "$smax" -gt 0 ] 2>/dev/null; then
+    printf 'empreinte observée derrière un cache (s-maxage=%ss%s)' \
+      "$smax" "${next:+, nextjs=$next}"
+  elif [ -n "$next" ]; then
+    printf 'empreinte observée derrière cache Next.js (%s)' "$next"
+  else
+    printf '—'
+  fi
+}
+
+# rc 0 : lm|hash|cache · rc 4 : |hash|cache (suivi empreinte) · rc 1/2 erreur
 observer_servi() {
-  local domain="$1" tmp hdr body code lm hash
+  local domain="$1" tmp hdr body code lm hash cache
   tmp=$(mktemp -d)
   hdr="$tmp/hdr"; body="$tmp/body"
   if ! curl -sS -L --max-time 20 -D "$hdr" -o "$body" "https://${domain}/" 2>/dev/null; then
     echo "INJOIGNABLE"; rm -rf "$tmp"; return 1
   fi
-  # Normaliser CRLF
   tr -d '\r' < "$hdr" > "$hdr.n" && mv "$hdr.n" "$hdr"
   code=$(awk 'BEGIN{c=""} /^HTTP\//{c=$2} END{print c}' "$hdr")
   case "$code" in
     2??) ;;
     *) echo "HTTP_${code:-0}"; rm -rf "$tmp"; return 2 ;;
   esac
-  lm=$(awk -F': ' 'tolower($1)=="last-modified"{print $2; exit}' "$hdr")
-  if [ -z "$lm" ]; then
-    echo "SANS_LAST_MODIFIED"; rm -rf "$tmp"; return 3
-  fi
   hash=$(sha256sum "$body" 2>/dev/null | awk '{print substr($1,1,12)}' \
     || shasum -a 256 "$body" | awk '{print substr($1,1,12)}')
-  printf '%s|%s\n' "$lm" "$hash"
+  cache=$(indice_cache "$hdr")
+  lm=$(awk -F': ' 'tolower($1)=="last-modified"{print $2; exit}' "$hdr")
+  if [ -z "$lm" ]; then
+    printf '|%s|%s\n' "$hash" "$cache"
+    rm -rf "$tmp"
+    return 4
+  fi
+  printf '%s|%s|%s\n' "$lm" "$hash" "$cache"
   rm -rf "$tmp"
   return 0
+}
+
+charger_empreintes_precedentes() {
+  if [ -n "${DETECTEUR_EMPREINTES_PREV:-}" ] && [ -f "$DETECTEUR_EMPREINTES_PREV" ]; then
+    cp "$DETECTEUR_EMPREINTES_PREV" "$PREV_EMP_FILE"
+    log "Empreintes précédentes depuis fichier ($DETECTEUR_EMPREINTES_PREV)"
+    return
+  fi
+  if [ "${DETECTEUR_DRY_RUN:-0}" = "1" ]; then
+    log "Dry-run sans PREV injecté — première observation pour suivi empreinte"
+    return
+  fi
+  local body
+  body=$(gh_issue issue view 2 -R "$REPO_DEPLOY" --json body -q .body 2>/dev/null || true)
+  if [ -z "$body" ]; then
+    log "Pas de corps d'issue — pas d'empreintes précédentes"
+    return
+  fi
+  printf '%s\n' "$body" | awk '
+    /<!-- DETECTEUR_EMPREINTES_V1/ {grab=1; next}
+    grab && /-->/ {exit}
+    grab && NF>=3 {print}
+  ' > "$PREV_EMP_FILE" || true
+  log "Empreintes précédentes depuis issue : $(wc -l < "$PREV_EMP_FILE" | tr -d " ") ligne(s)"
+}
+
+prev_hash_for() { awk -v d="$1" '$1==d {print $2; exit}' "$PREV_EMP_FILE"; }
+prev_when_for() { awk -v d="$1" '$1==d {print $3; exit}' "$PREV_EMP_FILE"; }
+
+memoriser_empreinte() {
+  local domain="$1" hash="$2" when="$3" cache="$4"
+  printf '%s %s %s %s\n' "$domain" "$hash" "$when" "$(printf '%s' "$cache" | tr ' ' '_')" \
+    >> "$RESULT_DIR/empreintes-nouvelles.txt"
 }
 
 enregistrer() {
@@ -135,30 +191,58 @@ enregistrer() {
   line=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
     "$domain" "$repo" "$commit" "$servi" "$ecart" "$empreinte" "$pub" "$raison")
   case "$etat" in
-    A_JOUR)     echo "$line" >> "$RESULT_DIR/a-jour.tsv";     n_a_jour=$((n_a_jour+1)); log "A_JOUR     $domain ($repo) emp=$empreinte" ;;
-    EN_RETARD)  echo "$line" >> "$RESULT_DIR/en-retard.tsv";  n_en_retard=$((n_en_retard+1)); log "EN_RETARD  $domain écart=${ecart}h emp=$empreinte" ;;
-    NON_MESURE) echo "$line" >> "$RESULT_DIR/non-mesure.tsv"; n_non_mesure=$((n_non_mesure+1)); log "NON_MESURE $domain — $raison" ;;
+    A_JOUR)
+      echo "$line" >> "$RESULT_DIR/a-jour.tsv"; n_a_jour=$((n_a_jour+1))
+      log "A_JOUR     $domain ($repo) emp=$empreinte" ;;
+    EN_RETARD)
+      echo "$line" >> "$RESULT_DIR/en-retard.tsv"; n_en_retard=$((n_en_retard+1))
+      log "EN_RETARD  $domain écart=${ecart}h emp=$empreinte" ;;
+    SUIVI_PAR_EMPREINTE)
+      echo "$line" >> "$RESULT_DIR/suivi-empreinte.tsv"; n_suivi=$((n_suivi+1))
+      log "SUIVI_EMP  $domain — $ecart emp=$empreinte" ;;
+    NON_MESURE)
+      echo "$line" >> "$RESULT_DIR/non-mesure.tsv"; n_non_mesure=$((n_non_mesure+1))
+      log "NON_MESURE $domain — $raison" ;;
   esac
+}
+
+classer_par_empreinte() {
+  local repo="$1" domain="$2" commit_iso="$3" hash="$4" cache="$5" pub="$6"
+  local prev when now obs raison
+  now=$(now_iso)
+  prev=$(prev_hash_for "$domain")
+  when=$(prev_when_for "$domain")
+  if [ -z "$prev" ]; then
+    obs="première observation le $now"
+  elif [ "$prev" = "$hash" ]; then
+    obs="inchangé depuis le ${when:-?}"
+  else
+    obs="a changé le $now"
+  fi
+  raison="SUIVI PAR EMPREINTE — ne compare pas à main, seulement au passage précédent"
+  if [ -n "$cache" ] && [ "$cache" != "—" ]; then
+    raison="$raison · $cache"
+  fi
+  memoriser_empreinte "$domain" "$hash" "$now" "$cache"
+  enregistrer SUIVI_PAR_EMPREINTE "$repo" "$domain" "$commit_iso" "$cache" "$obs" "$raison" "$hash" "$pub"
 }
 
 classer() {
   local repo="$1" domain="$2" override="${3:-}" pub="${4:-auto}"
-  local commit_iso servi_raw commit_e servi_e lm hash
+  local commit_iso servi_raw commit_e servi_e lm hash cache rest
 
   if [ -n "$AUTH_FAIL" ]; then
     enregistrer NON_MESURE "$repo" "$domain" "" "" "" "auth: $AUTH_FAIL_DETAIL" "" "$pub"
     return
   fi
-
   if [ -z "$domain" ]; then
     enregistrer NON_MESURE "$repo" "" "" "" "" "domaine inconnu" "" "$pub"
     return
   fi
-
   if [ -n "$override" ]; then
     commit_iso="$override"
   elif [[ "$repo" == PREUVE-* ]]; then
-    commit_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    commit_iso=$(now_iso)
   else
     commit_iso=$(dernier_commit_main "$repo") || commit_iso=""
   fi
@@ -178,10 +262,18 @@ classer() {
   case "$rc" in
     0)
       lm="${servi_raw%%|*}"
-      hash="${servi_raw#*|}"
+      rest="${servi_raw#*|}"
+      hash="${rest%%|*}"
+      cache="${rest#*|}"
+      ;;
+    4)
+      rest="${servi_raw#|}"
+      hash="${rest%%|*}"
+      cache="${rest#*|}"
+      classer_par_empreinte "$repo" "$domain" "$commit_iso" "$hash" "$cache" "$pub"
+      return
       ;;
     2) enregistrer NON_MESURE "$repo" "$domain" "$commit_iso" "" "" "domaine ne répond pas ($servi_raw)" "" "$pub"; return ;;
-    3) enregistrer NON_MESURE "$repo" "$domain" "$commit_iso" "" "" "pas de Last-Modified" "" "$pub"; return ;;
     *) enregistrer NON_MESURE "$repo" "$domain" "$commit_iso" "" "" "domaine injoignable" "" "$pub"; return ;;
   esac
 
@@ -192,6 +284,7 @@ classer() {
 
   local delta=$((commit_e - servi_e))
   local servi_iso; servi_iso=$(fmt_iso "$servi_e")
+  memoriser_empreinte "$domain" "$hash" "$(now_iso)" "${cache:-—}"
   if [ "$delta" -le "$TOLERANCE_SEC" ]; then
     enregistrer A_JOUR "$repo" "$domain" "$commit_iso" "$servi_iso" "$(ecart_h "$delta")" "" "$hash" "$pub"
   else
@@ -274,6 +367,9 @@ if [ -n "$M_precedent" ] && [ "$M_precedent" != "$M_declares" ]; then
   log "M a changé : précédent=$M_precedent → actuel=$M_declares"
 fi
 
+# Empreintes du passage précédent (corps d'issue ou fichier injecté).
+charger_empreintes_precedentes
+
 # --- auth ------------------------------------------------------------------
 if ! verifier_jeton; then
   log "Auth en échec : tous les sites → NON_MESURE, issue restera OUVERTE."
@@ -288,13 +384,21 @@ done
 if [ "$MODE" = "preuve" ] && [ -z "$AUTH_FAIL" ]; then
   log "=== Injection preuves ==="
   classer "PREUVE-domaine-inexistant" "domaine-qui-nexiste-pas-hl-detecteur.test" "" "auto"
+  # domisane : sans Last-Modified → SUIVI_PAR_EMPREINTE (plus NON_MESURE)
   classer "PREUVE-sans-last-modified" "domisane-suisse.ch" "" "manuelle"
   fake_commit=$(date -u -d '+2 days' +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
     || date -u -v+2d +"%Y-%m-%dT%H:%M:%SZ")
   classer "PREUVE-ecart-fabrique" "helvetique-toiture.ch" "$fake_commit" "auto"
 fi
 
-N_mesures=$((n_a_jour + n_en_retard + n_non_mesure))
+# Fusion empreintes : précédent + nouvelles (ciblage ne doit pas effacer le reste).
+EMP_FUSION="$RESULT_DIR/empreintes-fusion.txt"
+{
+  if [ -s "$PREV_EMP_FILE" ]; then cat "$PREV_EMP_FILE"; fi
+  if [ -s "$RESULT_DIR/empreintes-nouvelles.txt" ]; then cat "$RESULT_DIR/empreintes-nouvelles.txt"; fi
+} | awk '{h[$1]=$0} END{for (d in h) print h[d]}' | sort > "$EMP_FUSION"
+
+N_mesures=$((n_a_jour + n_en_retard + n_non_mesure + n_suivi))
 # En mode preuve / uniquement / ajout, N_mesures peut différer de la flotte fixe.
 if [ "$MODE" != "preuve" ] && [ "$passage_cible" -eq 0 ] && [ -z "${DETECTEUR_AJOUT_PREUVE:-}" ]; then
   if [ "$N_mesures" -ne "$n_flotte" ]; then
@@ -308,9 +412,8 @@ if [ "$MODE" != "preuve" ] && [ "$passage_cible" -eq 0 ] && [ -z "${DETECTEUR_AJ
 fi
 
 # Garde de verdict :
-#   M_couverture = n_flotte (sites à mesurer). N == M_couverture ⇔ balayage complet.
-#   « Tout à jour » seulement si N == M_couverture ET Y == 0 ET retard == 0
-#   ET pas ciblé ET pas d'échec auth. Sinon aucune phrase rassurante, issue ouverte.
+#   « Tout à jour » seulement si N == flotte ET Y == 0 ET retard == 0
+#   ET n_suivi == 0 ET pas ciblé ET pas d'échec auth.
 couverture_complete=0
 if [ "$passage_cible" -eq 0 ] && [ "$N_mesures" -eq "$n_flotte" ]; then
   couverture_complete=1
@@ -327,6 +430,8 @@ elif [ "$n_non_mesure" -gt 0 ]; then
   verdict="non_mesure"
 elif [ "$n_en_retard" -gt 0 ]; then
   verdict="retard"
+elif [ "$n_suivi" -gt 0 ]; then
+  verdict="suivi_empreinte"
 elif [ "$n_a_jour" -eq "$N_mesures" ]; then
   verdict="a_jour"
   peut_fermer=1
@@ -344,6 +449,7 @@ fi
   echo "n_a_jour=$n_a_jour"
   echo "n_en_retard=$n_en_retard"
   echo "n_non_mesure=$n_non_mesure"
+  echo "n_suivi=$n_suivi"
   echo "mode=$MODE"
   echo "passage_cible=$passage_cible"
   echo "couverture_complete=$couverture_complete"
@@ -382,9 +488,28 @@ markdown_table() {
   echo
 }
 
+markdown_table_suivi() {
+  local file="$1"
+  echo "### Suivi par empreinte"
+  echo
+  echo "> **Cet état ne compare rien à \`main\`.** Il constate seulement un changement (ou non) entre deux observations. Un site peut servir un contenu entièrement faux et rester « inchangé » indéfiniment."
+  echo
+  if [ ! -s "$file" ]; then
+    echo "_Aucun._"
+    echo
+    return
+  fi
+  echo "| Domaine | Dépôt | Empreinte | Observation | Cache / note | Publication |"
+  echo "|---|---|---|---|---|---|"
+  while IFS=$'\t' read -r domain repo commit servi ecart empreinte pub raison; do
+    printf '| %s | %s | `%s` | %s | %s | %s |\n' \
+      "${domain:-—}" "${repo:-—}" "${empreinte:-—}" "${ecart:-—}" "${servi:-—}" "${pub:-—}"
+  done < "$file"
+  echo
+}
+
 BODY_FILE="$RESULT_DIR/issue-body.md"
 {
-  # PREMIÈRE ligne du rapport : le ratio N/M — avant tout le reste.
   echo "**N/M** : **$N_mesures**/**$n_flotte**"
   echo
 
@@ -409,13 +534,13 @@ BODY_FILE="$RESULT_DIR/issue-body.md"
     echo
   fi
 
-  echo "Déclarés totaux : **$M_declares** (= $n_flotte mesurables + $n_exclus exclus). Dont **$n_non_mesure** non mesurés (Y). Publication manuelle : **$n_manuels_flotte**."
+  echo "Déclarés totaux : **$M_declares** (= $n_flotte mesurables + $n_exclus exclus). Dont **$n_non_mesure** non mesurés (Y) · **$n_suivi** suivi par empreinte. Publication manuelle : **$n_manuels_flotte**."
   echo
   echo "Généré : \`$(date -u +"%Y-%m-%dT%H:%M:%SZ")\` · mode : \`$MODE\` · tolérance : 2 h · jeton expire le **$JETON_EXPIRE_LE**"
   echo
   case "$verdict" in
     a_jour)
-      echo "**Verdict** : tout à jour — N/M complet ($N_mesures/$n_flotte), Y = 0, aucun retard."
+      echo "**Verdict** : tout à jour — N/M complet ($N_mesures/$n_flotte), Y = 0, aucun retard, aucun suivi-empreinte."
       ;;
     cible)
       echo "**Verdict** : passage ciblé — aucune conclusion flotte."
@@ -432,6 +557,9 @@ BODY_FILE="$RESULT_DIR/issue-body.md"
     retard)
       echo "**Verdict** : $n_en_retard site(s) en retard — issue ouverte."
       ;;
+    suivi_empreinte)
+      echo "**Verdict** : $n_suivi site(s) en SUIVI PAR EMPREINTE (pas de date comparable à main) — issue ouverte."
+      ;;
     *)
       echo "**Verdict** : état non rassurant (verdict=$verdict) — issue ouverte."
       ;;
@@ -445,7 +573,7 @@ BODY_FILE="$RESULT_DIR/issue-body.md"
     echo "_Mode preuve : injections domaine inexistant / sans Last-Modified / écart fabriqué incluses._"
     echo
   fi
-  echo "Répartition ce passage : **$n_en_retard** en retard · **$n_non_mesure** non mesurés · **$n_a_jour** à jour"
+  echo "Répartition ce passage : **$n_en_retard** en retard · **$n_non_mesure** non mesurés · **$n_suivi** suivi par empreinte · **$n_a_jour** à jour"
   echo
   echo "<details><summary>Publication manuelle ($n_manuels_flotte) — aucun automatisme de rattrapage</summary>"
   echo
@@ -470,15 +598,23 @@ BODY_FILE="$RESULT_DIR/issue-body.md"
   echo "</details>"
   echo
   markdown_table "$RESULT_DIR/en-retard.tsv" "En retard"
+  markdown_table_suivi "$RESULT_DIR/suivi-empreinte.tsv"
   markdown_table "$RESULT_DIR/non-mesure.tsv" "Non mesuré"
   markdown_table "$RESULT_DIR/a-jour.tsv" "À jour"
   echo "---"
   echo
-  echo "_Mesure = date Last-Modified du HTML servi + empreinte sha256[0:12] du corps. Pas de marqueur circulaire DEPLOY_COMMIT._"
+  echo "_Mesure datée = Last-Modified du HTML servi + empreinte sha256[0:12]. Pas de marqueur circulaire DEPLOY_COMMIT._"
   echo
-  echo "_Un site non mesuré n'est jamais classé à jour. N < M ou Y > 0 ⇒ pas de clôture. Absence de signal ≠ absence de problème._"
+  echo "_Un site non mesuré n'est jamais classé à jour. N < M ou Y > 0 ou suivi-empreinte > 0 ⇒ pas de clôture. Absence de signal ≠ absence de problème._"
   echo
-  echo "_Limite : « À jour » signifie seulement que la page servie n'est pas plus vieille que le dernier commit de main. L'empreinte HTML est relevée mais comparée à rien — un contenu entièrement différent resterait classé à jour tant que sa date est récente._"
+  echo "_Limite (sites datés) : « À jour » signifie seulement que la page servie n'est pas plus vieille que le dernier commit de main. L'empreinte HTML est relevée mais, pour ces sites, pas encore le critère de classement._"
+  echo
+  echo "_Persistance des empreintes : bloc machine ci-dessous dans le corps de l'issue (aucun commit par passage). Survit à un run raté = dernière écriture réussie._"
+  echo
+  # Bloc machine — ne pas éditer à la main.
+  echo "$EMP_MARKER_BEGIN"
+  if [ -s "$EMP_FUSION" ]; then cat "$EMP_FUSION"; fi
+  echo "$EMP_MARKER_END"
 } > "$BODY_FILE"
 
 # Mode dry-run : pas d'upsert issue (preuves locales / sabotage auth hors Actions issues).
@@ -542,6 +678,9 @@ annoncer_non_conclusif() {
       ;;
     retard)
       msg="**Passage non conclusif** — $n_en_retard en retard, N/M=$N_mesures/$n_flotte, Y=$n_non_mesure. Issue ouverte. Lire le corps."
+      ;;
+    suivi_empreinte)
+      msg="**Passage non conclusif** — $n_suivi site(s) en SUIVI PAR EMPREINTE (pas de date vs main), N/M=$N_mesures/$n_flotte. Issue ouverte. Lire le corps."
       ;;
     *)
       msg="**Passage non conclusif** — verdict=$verdict, N/M=$N_mesures/$n_flotte, Y=$n_non_mesure. Issue ouverte. Lire le corps."
