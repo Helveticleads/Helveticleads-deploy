@@ -222,6 +222,23 @@ preuve_13_nm_tete() {
   ok "$grade" "preuve 13 — N/M est la ligne 1 du rapport"
 }
 
+# --- Preuve 14 : limite « empreinte comparée à rien » au pied ---
+preuve_14_limite() {
+  local grade=1
+  need_token
+  JETON_LECTURE_DEPOTS="" DETECTEUR_MODE=normal run_dry p14 env
+  grep -q "empreinte HTML est relevée mais comparée à rien" "$OUT/p14/issue-body.md" \
+    || ko "$grade" "phrase de limite absente du pied"
+  grep -q "Absence de signal ≠ absence de problème\|Absence de signal" "$OUT/p14/issue-body.md" \
+    || ko "$grade" "phrase absence de signal absente"
+  # La limite doit apparaître après les tableaux (ou en bas) — au moins après N/M
+  local lim nm
+  lim=$(grep -n 'comparée à rien' "$OUT/p14/issue-body.md" | head -1 | cut -d: -f1)
+  nm=$(grep -n '^\*\*N/M\*\*' "$OUT/p14/issue-body.md" | head -1 | cut -d: -f1)
+  [ "$lim" -gt "$nm" ] || ko "$grade" "limite pas après N/M"
+  ok "$grade" "preuve 14 — limite empreinte écrite au pied du rapport"
+}
+
 echo "=== Preuves détecteur d'écart ==="
 preuve_7_exclus
 preuve_8_expiration
@@ -236,6 +253,7 @@ preuve_10_y_gt_0
 preuve_11_cible
 preuve_12_manuels
 preuve_13_nm_tete
+preuve_14_limite
 
 echo
 echo "RESULT pass=$pass fail=$fail"
