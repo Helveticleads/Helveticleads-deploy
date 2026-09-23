@@ -476,7 +476,9 @@ BODY_FILE="$RESULT_DIR/issue-body.md"
   echo
   echo "_Mesure = date Last-Modified du HTML servi + empreinte sha256[0:12] du corps. Pas de marqueur circulaire DEPLOY_COMMIT._"
   echo
-  echo "_Un site non mesuré n'est jamais classé à jour. N < M ou Y > 0 ⇒ pas de clôture._"
+  echo "_Un site non mesuré n'est jamais classé à jour. N < M ou Y > 0 ⇒ pas de clôture. Absence de signal ≠ absence de problème._"
+  echo
+  echo "_Limite : « À jour » signifie seulement que la page servie n'est pas plus vieille que le dernier commit de main. L'empreinte HTML est relevée mais comparée à rien — un contenu entièrement différent resterait classé à jour tant que sa date est récente._"
 } > "$BODY_FILE"
 
 # Mode dry-run : pas d'upsert issue (preuves locales / sabotage auth hors Actions issues).
@@ -491,6 +493,63 @@ assurer_label() {
   gh_issue label create "$ISSUE_LABEL" -R "$REPO_DEPLOY" --description "Rapport du détecteur d'écart" --color "B60205" 2>/dev/null || true
 }
 assurer_label
+
+# Commentaires conclusifs antérieurs (« Tout à jour… ») : les invalider
+# (minimize OUTDATED) pour qu'une notification ne les fasse plus lire en premier.
+invalider_commentaires_conclusifs() {
+  local num="$1"
+  local nodes nid body
+  nodes=$(gh_issue api graphql -f query="
+    query {
+      repository(owner:\"Helveticleads\", name:\"Helveticleads-deploy\") {
+        issue(number: $num) {
+          comments(first: 50) {
+            nodes { id body isMinimized }
+          }
+        }
+      }
+    }" --jq '.data.repository.issue.comments.nodes[] | select(.isMinimized==false) | select(.body|test("Tout à jour"; "i")) | .id' 2>/dev/null || true)
+  for nid in $nodes; do
+    [ -n "$nid" ] || continue
+    gh_issue api graphql -f query="
+      mutation {
+        minimizeComment(input: {subjectId: \"$nid\", classifier: OUTDATED}) {
+          minimizedComment { isMinimized }
+        }
+      }" >/dev/null 2>&1 || log "WARN minimizeComment échoué pour $nid"
+    log "Commentaire conclusif invalidé (OUTDATED): $nid"
+  done
+}
+
+# Quand on ne peut pas conclure : invalider les vieux « Tout à jour » et
+# poster un commentaire de vérité pour qu'il soit le plus récent.
+annoncer_non_conclusif() {
+  local num="$1"
+  local msg
+  invalider_commentaires_conclusifs "$num"
+  case "$verdict" in
+    cible)
+      msg="**Passage non conclusif** (ciblé : \`$cible_label\`). N/M=$N_mesures/$n_flotte. Aucune conclusion flotte — lire le corps de l'issue."
+      ;;
+    auth)
+      msg="**Passage non conclusif** — échec d'authentification. N/M=$N_mesures/$n_flotte, Y=$n_non_mesure. Issue ouverte. Lire le corps."
+      ;;
+    incomplet)
+      msg="**Passage non conclusif** — N < M ($N_mesures/$n_flotte). Aucun « tout à jour ». Issue ouverte. Lire le corps."
+      ;;
+    non_mesure)
+      msg="**Passage non conclusif** — Y=$n_non_mesure non mesuré(s), N/M=$N_mesures/$n_flotte. Issue ouverte. Lire le corps."
+      ;;
+    retard)
+      msg="**Passage non conclusif** — $n_en_retard en retard, N/M=$N_mesures/$n_flotte, Y=$n_non_mesure. Issue ouverte. Lire le corps."
+      ;;
+    *)
+      msg="**Passage non conclusif** — verdict=$verdict, N/M=$N_mesures/$n_flotte, Y=$n_non_mesure. Issue ouverte. Lire le corps."
+      ;;
+  esac
+  gh_issue issue comment "$num" -R "$REPO_DEPLOY" --body "$msg" >/dev/null
+  log "Commentaire non conclusif posté sur #$num"
+}
 
 EXISTING=$(gh_issue issue list -R "$REPO_DEPLOY" --state all --limit 50 \
   --json number,title,state,url \
@@ -508,6 +567,8 @@ if [ "$passage_cible" -eq 1 ]; then
       --title "$ISSUE_TITLE" \
       --label "$ISSUE_LABEL" \
       --body-file "$BODY_FILE")
+    NUM=$(printf '%s' "$URL" | grep -oE '[0-9]+$')
+    annoncer_non_conclusif "$NUM"
     log "Issue créée (ouverte, passage ciblé sans conclusion) : $URL"
   else
     NUM=$(printf '%s' "$EXISTING" | python3 -c 'import sys,json; print(json.load(sys.stdin)["number"])')
@@ -515,12 +576,11 @@ if [ "$passage_cible" -eq 1 ]; then
     URL=$(printf '%s' "$EXISTING" | python3 -c 'import sys,json; print(json.load(sys.stdin)["url"])')
     upsert_body "$NUM"
     if [ "$STATE" = "CLOSED" ]; then
-      gh_issue issue reopen "$NUM" -R "$REPO_DEPLOY" \
-        --comment "Passage ciblé (\`$cible_label\`) — rouverture, aucune conclusion flotte."
+      gh_issue issue reopen "$NUM" -R "$REPO_DEPLOY"
       log "Issue rouverte (passage ciblé) : $URL"
-    else
-      log "Issue mise à jour (ouverte, passage ciblé, pas de conclusion) : $URL"
     fi
+    annoncer_non_conclusif "$NUM"
+    log "Issue mise à jour (ouverte, passage ciblé, pas de conclusion) : $URL"
   fi
   echo "$URL" > "$RESULT_DIR/issue-url.txt"
   echo "$M_declares" > "$RESULT_DIR/M_declares.txt"
@@ -539,6 +599,7 @@ if [ -z "$EXISTING" ]; then
       --comment "Tout à jour — N/M=$N_mesures/$n_flotte, Y=0."
     log "Issue créée puis fermée : $URL"
   else
+    annoncer_non_conclusif "$NUM"
     log "Issue créée (ouverte, verdict=$verdict) : $URL"
   fi
 else
@@ -557,12 +618,11 @@ else
   else
     # N < M, Y > 0, retard, ou auth : DOIT rester / être ouverte. Jamais de phrase rassurante.
     if [ "$STATE" = "CLOSED" ]; then
-      gh_issue issue reopen "$NUM" -R "$REPO_DEPLOY" \
-        --comment "Rouverture — verdict=$verdict (N/M=$N_mesures/$n_flotte, Y=$n_non_mesure)."
+      gh_issue issue reopen "$NUM" -R "$REPO_DEPLOY"
       log "Issue rouverte : $URL"
-    else
-      log "Issue mise à jour (ouverte, verdict=$verdict) : $URL"
     fi
+    annoncer_non_conclusif "$NUM"
+    log "Issue mise à jour (ouverte, verdict=$verdict) : $URL"
   fi
 fi
 
