@@ -4,7 +4,7 @@ name: Detecteur ecart fusionne servi
 
 on:
   schedule:
-    - cron: "0 6 * * *"   # 06:00 UTC
+    - cron: "0 6 * * *"   # 06:00 UTC — jamais ciblé
   workflow_dispatch:
     inputs:
       mode:
@@ -17,11 +17,11 @@ on:
         type: boolean
         default: false
       uniquement:
-        description: "Optionnel : repo|domaine pour un passage ciblé (preuve fermeture)"
+        description: "Mise au point SEULEMENT : repo|domaine. Interdit en schedule. Ne ferme jamais."
         type: string
         default: ""
   push:
-    branches: [feat/detecteur-ecart]
+    branches: [fix/detecteur-gardes-denom, feat/detecteur-ecart]
     paths:
       - "ops/detecteur-ecart/**"
       - ".github/workflows/detecteur-ecart.yml"
@@ -41,11 +41,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Harness 8 preuves (dry-run sauf upsert ciblé)
+      - name: Harness preuves (dry-run — ne ferme jamais l'issue)
         env:
           JETON_LECTURE_DEPOTS: ${{ secrets.JETON_LECTURE_DEPOTS }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DETECTEUR_SKIP_ISSUE: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+          # Toujours 1 : un passage ciblé du harness ne doit plus écrire/fermer l'issue.
+          DETECTEUR_SKIP_ISSUE: "1"
         run: |
           set -euo pipefail
           chmod +x ops/detecteur-ecart/detecteur.sh ops/detecteur-ecart/preuves.sh
@@ -63,25 +64,22 @@ jobs:
           JETON_LECTURE_DEPOTS: ${{ secrets.JETON_LECTURE_DEPOTS }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DETECTEUR_MODE: ${{ github.event.inputs.mode || 'normal' }}
-          DETECTEUR_UNIQUEMENT: ${{ github.event.inputs.uniquement || '' }}
+          # Schedule : inputs absents → chaîne vide. Jamais de défaut piscine.
+          DETECTEUR_UNIQUEMENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.uniquement || '' }}
+          DETECTEUR_EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           MODE="${DETECTEUR_MODE}"
+          # Garde schedule : cibler est une erreur fatale (aussi dans detecteur.sh).
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            unset DETECTEUR_UNIQUEMENT || true
+            export DETECTEUR_UNIQUEMENT=""
+            MODE=normal
+          fi
           if [ "${{ github.event_name }}" = "push" ]; then
-            msg="${{ github.event.head_commit.message }}"
-            if echo "$msg" | grep -q '\[preuve-sain\]'; then
-              MODE=normal
-              export DETECTEUR_UNIQUEMENT="FR-helvetique-piscine.ch|helvetique-piscine.ch"
-            elif echo "$msg" | grep -q '\[preuve-auth\]'; then
-              MODE=sabotage-auth
-            elif echo "$msg" | grep -q '\[preuve\]'; then
-              MODE=preuve
-            else
-              # Push de livraison : ne pas balayer toute la flotte (évite bruit).
-              # Les passages flotte = schedule / workflow_dispatch.
-              echo "Push livraison — skip flotte (utiliser workflow_dispatch)."
-              exit 0
-            fi
+            # Push = CI preuves seulement ; pas de balayage flotte ni de ciblage.
+            echo "Push — skip job detecter (harness preuves séparé)."
+            exit 0
           fi
           if [ "${{ github.event.inputs.ajout_preuve || false }}" = "true" ]; then
             export DETECTEUR_AJOUT_PREUVE=1
@@ -94,6 +92,13 @@ jobs:
           else
             export DETECTEUR_MODE="$MODE"
           fi
+          # Trace explicite : d'où vient UNIQUEMENT (si non vide).
+          if [ -n "${DETECTEUR_UNIQUEMENT:-}" ]; then
+            echo "DETECTEUR_UNIQUEMENT actif (workflow_dispatch input 'uniquement') = ${DETECTEUR_UNIQUEMENT}"
+            echo "Source YAML : env DETECTEUR_UNIQUEMENT ← github.event.inputs.uniquement (uniquement si event=workflow_dispatch)"
+          else
+            echo "DETECTEUR_UNIQUEMENT vide — balayage flotte complet"
+          fi
           chmod +x ops/detecteur-ecart/detecteur.sh
           bash ops/detecteur-ecart/detecteur.sh
 
@@ -104,9 +109,5 @@ jobs:
           cat .detecteur-out/meta.txt 2>/dev/null || true
           echo "=== issue ==="
           cat .detecteur-out/issue-url.txt 2>/dev/null || true
-          echo "=== en retard ==="
-          cat .detecteur-out/en-retard.tsv 2>/dev/null || true
-          echo "=== non mesuré (extrait) ==="
-          head -40 .detecteur-out/non-mesure.tsv 2>/dev/null || true
           echo "=== tête du rapport ==="
           head -40 .detecteur-out/issue-body.md 2>/dev/null || true
