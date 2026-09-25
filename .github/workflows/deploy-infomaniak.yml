@@ -140,11 +140,12 @@ jobs:
           PREV="$("${SSH_CMD[@]}" "readlink '$BASE/current'" 2>/dev/null || true)"
           echo "PREV=$PREV"
 
-          # ── Garde anti-perte (portée de Premium-Suisse-Leads#127) ─────────
-          # Aucune URL indexée servie ne doit disparaître. Vérifié AVANT
-          # d'écrire : après, le mal est fait. Ensemble vide ≠ feu vert.
-          SERVI=$(mktemp); BATI=$(mktemp)
-          trap 'rm -f "$SERVI" "$BATI"' EXIT
+          # ── Garde anti-perte v2 (portée #127 + migrations 301 mesurées) ──
+          # Aucune URL indexée servie ne doit disparaître SANS 301 HTTP
+          # vérifiée vers une cible du bâti. Mesure, pas checklist.
+          # Vérifié AVANT d'écrire. Ensemble vide ≠ feu vert.
+          SERVI=$(mktemp); BATI=$(mktemp); CAND=$(mktemp)
+          trap 'rm -f "$SERVI" "$BATI" "$CAND"' EXIT
           if ! "${SSH_CMD[@]}" \
             "cd '$BASE/current' && find -L . -name index.html | sed 's|^\\./||;s|/index.html\$||;s|^index.html\$|/|' | LC_ALL=C sort" \
             > "$SERVI" 2>/dev/null; then
@@ -162,13 +163,118 @@ jobs:
             echo "GATE_FAIL anti_perte:bati=0 (build vide)"
             exit 1
           fi
-          PERDUES=$(comm -23 "$SERVI" "$BATI" | grep -c . || true)
+          comm -23 "$SERVI" "$BATI" > "$CAND"
+
+          # path inventaire → URL. Sonde LES DEUX formes (avec/sans "/") :
+          # une location = sans variante "/" laisse encore répondre 200.
+          path_to_url() {
+            local p="$1"
+            if [ "$p" = "/" ]; then echo "https://$DOMAIN/"; else echo "https://$DOMAIN/$p"; fi
+          }
+          # Location → path inventaire (sans slash final, sauf "/").
+          loc_to_path() {
+            local loc="$1" path
+            path=$(printf '%s' "$loc" | sed -E 's|^[a-zA-Z]+://[^/]+||; s|\?.*||; s|#.*||')
+            [ -z "$path" ] && path="/"
+            if [ "$path" != "/" ]; then path=$(printf '%s' "$path" | sed 's|/$||'); path=${path#/}; fi
+            printf '%s' "$path"
+          }
+          # Suit au plus 2 sauts 301/308. Succès si une cible tombe dans BATI.
+          follow_migration() {
+            local url="$1" hops=0 code loc path
+            while [ "$hops" -lt 2 ]; do
+              code=$(curl -sS -o /dev/null -D /tmp/anti_perte_hdrs -w '%{http_code}' \
+                --max-time 15 -H 'Cache-Control: no-store' "$url" || echo 000)
+              case "$code" in
+                301|308) ;;
+                *) return 1 ;;
+              esac
+              loc=$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/,""); gsub(/\r/,""); print; exit}' \
+                /tmp/anti_perte_hdrs)
+              [ -n "$loc" ] || return 1
+              case "$loc" in
+                http://*|https://*)
+                  case "$loc" in
+                    "http://$DOMAIN"|"http://$DOMAIN/"*|"https://$DOMAIN"|"https://$DOMAIN/"*) ;;
+                    *) return 1 ;;
+                  esac
+                  ;;
+                /*) loc="https://$DOMAIN$loc" ;;
+                *) return 1 ;;
+              esac
+              path=$(loc_to_path "$loc")
+              if grep -Fxq "$path" "$BATI"; then
+                printf '%s' "$path"
+                return 0
+              fi
+              url="$loc"
+              hops=$((hops + 1))
+            done
+            return 1
+          }
+          # Les deux formes doivent migrer (sauf "/"). Diagnostics → stderr ;
+          # stdout = uniquement la cible inventaire si OK.
+          probe_one_form() {
+            local url="$1" code
+            code=$(curl -sS -o /dev/null -D /tmp/anti_perte_hdrs -w '%{http_code}' \
+              --max-time 15 -H 'Cache-Control: no-store' "$url" || echo 000)
+            case "$code" in
+              301|308)
+                if cible=$(follow_migration "$url"); then
+                  echo "ok:$cible"
+                  return 0
+                fi
+                echo "fail:301_cible_hors_bati_ou_chaine"
+                return 1
+                ;;
+              *)
+                echo "fail:http_$code"
+                return 1
+                ;;
+            esac
+          }
+          probe_both_forms() {
+            local p="$1" u0 r0 r1 c0
+            if [ "$p" = "/" ]; then
+              r0=$(probe_one_form "https://$DOMAIN/") || {
+                echo "  sonde: / → $r0" >&2
+                return 1
+              }
+              c0=${r0#ok:}
+              echo "  sonde: / → 301→$c0" >&2
+              printf '%s' "$c0"
+              return 0
+            fi
+            u0=$(path_to_url "$p")
+            r0=$(probe_one_form "$u0") || true
+            r1=$(probe_one_form "$u0/") || true
+            echo "  sonde: /$p → $r0" >&2
+            echo "  sonde: /$p/ → $r1" >&2
+            case "$r0" in ok:*) ;; *) return 1 ;; esac
+            case "$r1" in ok:*) ;; *) return 1 ;; esac
+            c0=${r0#ok:}
+            printf '%s' "$c0"
+            return 0
+          }
+
+          MIGREES=0
+          PERDUES=0
+          while IFS= read -r p || [ -n "$p" ]; do
+            [ -z "$p" ] && continue
+            if cible=$(probe_both_forms "$p"); then
+              MIGREES=$((MIGREES + 1))
+              echo "  migree: $p → $cible"
+            else
+              PERDUES=$((PERDUES + 1))
+              echo "  manquante: $p (pas de 301→bati sur les deux formes)"
+            fi
+          done < "$CAND"
+
           if [ "$PERDUES" -gt 0 ]; then
-            echo "GATE_FAIL anti_perte:$PERDUES URL(s) servie(s) absente(s) du bâti — déploiement refusé"
-            comm -23 "$SERVI" "$BATI" | head -20 | sed 's/^/  manquante: /'
+            echo "GATE_FAIL anti_perte:perdues=$PERDUES migrees=$MIGREES servi=$NS bati=$NB — déploiement refusé"
             exit 1
           fi
-          echo "GATE_OK anti_perte servi=$NS bati=$NB perdues=0"
+          echo "GATE_OK anti_perte servi=$NS bati=$NB perdues=0 migrees=$MIGREES"
 
           retry rsync -avz --delete \
             -e "$RSYNC_SSH" \
