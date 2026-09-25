@@ -83,14 +83,21 @@ preuve_2_en_retard() {
   ok "$grade" "preuve 2 — EN_RETARD écart=${ecart}h"
 }
 
-# --- Preuve 3 : injoignable → NON_MESURE ---
+# --- Preuve 3 : 1er injoignable → avertissement (non bloquant) ---
 preuve_3_injoignable() {
   local grade=1
   need_token
   DETECTEUR_MODE=preuve DETECTEUR_UNIQUEMENT="FR-helvetique-piscine.ch|helvetique-piscine.ch" \
     run_dry p3 env
-  grep -q 'PREUVE-domaine-inexistant' "$OUT/p3/non-mesure.tsv" || ko "$grade" "pas NON_MESURE"
-  ok "$grade" "preuve 3 — domaine injoignable → NON_MESURE"
+  grep -q 'PREUVE-domaine-inexistant' "$OUT/p3/avertissement-injoignable.tsv" \
+    || ko "$grade" "pas AVERT_INJOIGNABLE (got $(ls "$OUT/p3"/*.tsv))"
+  if grep -q 'PREUVE-domaine-inexistant' "$OUT/p3/injoignable.tsv" 2>/dev/null; then
+    ko "$grade" "1er échec indûment INJOIGNABLE"
+  fi
+  if grep -q 'PREUVE-domaine-inexistant' "$OUT/p3/non-mesure.tsv" 2>/dev/null; then
+    ko "$grade" "injoignable encore en NON_MESURE"
+  fi
+  ok "$grade" "preuve 3 — 1er injoignable → avertissement non bloquant"
 }
 
 # --- Preuve 4 : jeton vidé ---
@@ -155,18 +162,21 @@ preuve_9_n_lt_m() {
   ok "$grade" "preuve 9 — N=1 < M=56 → pas rassurant, peut_fermer=0, N/M en tête"
 }
 
-# --- Preuve 10 : Y > 0 ⇒ peut_fermer=0 ---
-preuve_10_y_gt_0() {
+# --- Preuve 10 : 2e injoignable consécutif → INJOIGNABLE bloquant ---
+preuve_10_injoignable_2() {
   local grade=1
   need_token
-  DETECTEUR_MODE=preuve DETECTEUR_UNIQUEMENT="FR-helvetique-piscine.ch|helvetique-piscine.ch" \
+  local prev="$OUT/prev-inj.txt"
+  printf 'domaine-qui-nexiste-pas-hl-detecteur.test 1 2026-09-01T00:00:00Z\n' > "$prev"
+  DETECTEUR_INJOIGNABLE_PREV="$prev" DETECTEUR_MODE=preuve \
+    DETECTEUR_UNIQUEMENT="FR-helvetique-piscine.ch|helvetique-piscine.ch" \
     run_dry p10 env
-  local y
-  y=$(grep '^n_non_mesure=' "$OUT/p10/meta.txt" | cut -d= -f2)
-  [ "$y" -gt 0 ] || ko "$grade" "Y devrait être > 0 (got $y)"
-  grep -q 'peut_fermer=0' "$OUT/p10/meta.txt" || ko "$grade" "peut_fermer devrait être 0 si Y>0"
+  grep -q 'PREUVE-domaine-inexistant' "$OUT/p10/injoignable.tsv" \
+    || ko "$grade" "pas INJOIGNABLE au 2e passage"
+  grep -q 'n_injoignable=1' "$OUT/p10/meta.txt" || ko "$grade" "n_injoignable≠1"
+  # Ciblé → peut_fermer=0 de toute façon ; on vérifie le seau + absence rassurant
   assert_no_rassurant "$OUT/p10/issue-body.md" "$grade" "preuve 10"
-  ok "$grade" "preuve 10 — Y=$y > 0 → peut_fermer=0"
+  ok "$grade" "preuve 10 — 2e injoignable → INJOIGNABLE bloquant"
 }
 
 # --- Preuve 11 : passage ciblé — titre + pas de conclusion ---
@@ -278,6 +288,63 @@ preuve_16_empreinte_delta() {
   ok "$grade" "preuve 16 — inchangé / a changé selon PREV (sabotage hash)"
 }
 
+# --- Preuve 17 : marqueur brouillon → hors population ---
+preuve_17_brouillon() {
+  local grade=1
+  need_token
+  DETECTEUR_MARQUEUR_OVERRIDE="FR-helvetique-piscine.ch|brouillon|2026-09-01T00:00:00Z" \
+    run_dry p17 env DETECTEUR_UNIQUEMENT="FR-helvetique-piscine.ch|helvetique-piscine.ch"
+  grep -q 'helvetique-piscine.ch' "$OUT/p17/brouillon.tsv" || ko "$grade" "pas BROUILLON"
+  grep -q 'n_brouillon=1' "$OUT/p17/meta.txt" || ko "$grade" "n_brouillon≠1"
+  if grep -q 'helvetique-piscine' "$OUT/p17/en-retard.tsv" 2>/dev/null; then
+    ko "$grade" "brouillon indûment EN_RETARD"
+  fi
+  if grep -q 'helvetique-piscine' "$OUT/p17/a-jour.tsv" 2>/dev/null; then
+    ko "$grade" "brouillon indûment A_JOUR"
+  fi
+  grep -q 'Pas encore publiés\|pas encore publié' "$OUT/p17/issue-body.md" \
+    || ko "$grade" "section pas encore publiés absente"
+  ok "$grade" "preuve 17 — brouillon hors population + âge"
+}
+
+# --- Preuve 18 : brouillon ≥ 60 j → BROUILLON_DORMANT ---
+preuve_18_brouillon_dormant() {
+  local grade=1
+  need_token
+  DETECTEUR_MARQUEUR_OVERRIDE="FR-helvetique-piscine.ch|brouillon|2026-01-01T00:00:00Z" \
+    run_dry p18 env DETECTEUR_UNIQUEMENT="FR-helvetique-piscine.ch|helvetique-piscine.ch"
+  grep -q 'helvetique-piscine.ch' "$OUT/p18/brouillon-dormant.tsv" \
+    || ko "$grade" "pas BROUILLON_DORMANT"
+  grep -q 'n_brouillon_dormant=1' "$OUT/p18/meta.txt" || ko "$grade" "n_brouillon_dormant≠1"
+  ok "$grade" "preuve 18 — brouillon ≥ 60 j → BROUILLON_DORMANT"
+}
+
+# --- Preuve 19 : marqueur ABSENT = en_ligne (site réel mesuré) ---
+preuve_19_absent_en_ligne() {
+  local grade=1
+  need_token
+  # Pas d'override → API ; piscine n'a pas de marqueur → en_ligne → A_JOUR
+  run_dry p19 env DETECTEUR_UNIQUEMENT="FR-helvetique-piscine.ch|helvetique-piscine.ch"
+  grep -q 'n_a_jour=1' "$OUT/p19/meta.txt" || ko "$grade" "absent ne doit pas sortir du filet"
+  grep -q 'n_brouillon=0' "$OUT/p19/meta.txt" || ko "$grade" "absent traité comme brouillon"
+  ok "$grade" "preuve 19 — marqueur absent = en_ligne = surveillé"
+}
+
+# --- Preuve 20 : README documente la convention ---
+preuve_20_readme() {
+  local grade=1
+  local r="$DIR/README.md"
+  [ -f "$r" ] || ko "$grade" "README absent"
+  grep -q '\.helveticleads/publication' "$r" || ko "$grade" "chemin marqueur absent"
+  grep -q 'brouillon' "$r" || ko "$grade" "valeur brouillon absente"
+  grep -q 'en_ligne' "$r" || ko "$grade" "valeur en_ligne absente"
+  grep -qiE 'absent.*=.*en_ligne|ABSENT.*en_ligne' "$r" || ko "$grade" "règle absence absente"
+  grep -q '60' "$r" || ko "$grade" "seuil 60 j absent"
+  grep -q 'MODIFS RÉSEAUX\|MODIFS RESEAUX' "$r" || ko "$grade" "passation MODIFS RÉSEAUX absente"
+  grep -qi 'jamais servi\|dist/public\|pas.*servi' "$r" || ko "$grade" "interdiction de servir absente"
+  ok "$grade" "preuve 20 — README convention publication"
+}
+
 echo "=== Preuves détecteur d'écart ==="
 preuve_7_exclus
 preuve_8_expiration
@@ -288,13 +355,17 @@ preuve_4_auth
 preuve_5_denom
 preuve_6_upsert
 preuve_9_n_lt_m
-preuve_10_y_gt_0
+preuve_10_injoignable_2
 preuve_11_cible
 preuve_12_manuels
 preuve_13_nm_tete
 preuve_14_limite
 preuve_15_suivi_empreinte
 preuve_16_empreinte_delta
+preuve_17_brouillon
+preuve_18_brouillon_dormant
+preuve_19_absent_en_ligne
+preuve_20_readme
 
 echo
 echo "RESULT pass=$pass fail=$fail"
