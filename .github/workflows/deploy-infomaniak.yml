@@ -106,7 +106,8 @@ jobs:
 
           rollback() {
             if [ -n "${PREV:-}" ] && [ "$PREV" != "$BASE/current" ] && "${SSH_CMD[@]}" "test -d '$PREV'"; then
-              "${SSH_CMD[@]}" "ln -sfn '$PREV' '$BASE/current'"
+              "${SSH_CMD[@]}" \
+                "ln -sfn '$PREV' '$BASE/.current.tmp' && mv -Tf '$BASE/.current.tmp' '$BASE/current'"
               echo "ROLLBACK→$PREV"
             else
               echo "ROLLBACK_SKIP: PREV vide/invalide (${PREV:-∅})"
@@ -118,12 +119,45 @@ jobs:
           PREV="$("${SSH_CMD[@]}" "readlink '$BASE/current'" 2>/dev/null || true)"
           echo "PREV=$PREV"
 
+          # ── Garde anti-perte (portée de Premium-Suisse-Leads#127) ─────────
+          # Aucune URL indexée servie ne doit disparaître. Vérifié AVANT
+          # d'écrire : après, le mal est fait. Ensemble vide ≠ feu vert.
+          SERVI=$(mktemp); BATI=$(mktemp)
+          trap 'rm -f "$SERVI" "$BATI"' EXIT
+          if ! "${SSH_CMD[@]}" \
+            "cd '$BASE/current' && find -L . -name index.html | sed 's|^\\./||;s|/index.html\$||;s|^index.html\$|/|' | LC_ALL=C sort" \
+            > "$SERVI" 2>/dev/null; then
+            echo "GATE_FAIL anti_perte:SSH_ou_current_absent"
+            exit 1
+          fi
+          (cd "$SRC" && find -L . -name index.html | sed 's|^\./||;s|/index.html$||;s|^index.html$|/|' | LC_ALL=C sort) > "$BATI"
+          NS=$(grep -c . "$SERVI" || true)
+          NB=$(grep -c . "$BATI" || true)
+          if [ "$NS" -eq 0 ]; then
+            echo "GATE_FAIL anti_perte:servi=0 (mauvais hôte, current absent, ou site vide)"
+            exit 1
+          fi
+          if [ "$NB" -eq 0 ]; then
+            echo "GATE_FAIL anti_perte:bati=0 (build vide)"
+            exit 1
+          fi
+          PERDUES=$(comm -23 "$SERVI" "$BATI" | grep -c . || true)
+          if [ "$PERDUES" -gt 0 ]; then
+            echo "GATE_FAIL anti_perte:$PERDUES URL(s) servie(s) absente(s) du bâti — déploiement refusé"
+            comm -23 "$SERVI" "$BATI" | head -20 | sed 's/^/  manquante: /'
+            exit 1
+          fi
+          echo "GATE_OK anti_perte servi=$NS bati=$NB perdues=0"
+
           retry rsync -avz --delete \
             -e "$RSYNC_SSH" \
             "$SRC/" \
             "deploy@$HOST:$BASE/releases/$TS/"
 
-          retry "${SSH_CMD[@]}" "ln -sfn '$BASE/releases/$TS' '$BASE/current'"
+          # Bascule atomique : rename() via tmp — pas de fenêtre où current
+          # n'existe pas (ln -sfn = unlink puis symlink → 404 possible).
+          retry "${SSH_CMD[@]}" \
+            "ln -sfn '$BASE/releases/$TS' '$BASE/.current.tmp' && mv -Tf '$BASE/.current.tmp' '$BASE/current'"
           echo "GATE_OK symlink"
 
           # Courte pause : laisse nginx / éventuel cache fichier digérer la bascule.
