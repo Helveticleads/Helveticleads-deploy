@@ -56,6 +56,9 @@ jobs:
           PORT: "10000"
           BASE_PATH: "/"
           NODE_ENV: production
+          # Ne pas laisser DOMAIN (= inputs.domain) polluer generate-sitemap :
+          # sous pnpm --filter, ça préfixe les URLs et fait échouer sitemap-eq.
+          DOMAIN: ""
         run: pnpm --filter ${{ inputs.artifact }} run build
 
       - name: Gates build-time
