@@ -52,3 +52,7 @@ Si un site est `EN_RETARD` et que les messages de commit depuis la page servie p
 - `detecteur.sh` — passage schedule / dry-run
 - `preuves.sh` — harness local (ne ferme jamais l’issue)
 - `sites-auto.txt` / `sites-declares.txt` / `exclusions.txt` — inventaire
+
+## Fixtures de test
+
+Exemples sous `fixtures/` (ex. `publication.brouillon`). Jamais à la racine de Helveticleads-deploy.
