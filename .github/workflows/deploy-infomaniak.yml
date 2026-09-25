@@ -20,6 +20,11 @@ on:
         required: false
         type: string
         default: "/"
+      preuve_sabotage_retire:
+        description: "PREUVE UNIQUEMENT — chemin relatif sous dist/public à supprimer après build (ex. anliegen/index.html). La garde anti-perte doit alors refuser avant rsync."
+        required: false
+        type: string
+        default: ""
 
 jobs:
   deploy:
@@ -77,6 +82,19 @@ jobs:
           fi
 
           echo "GATE_OK build_local"
+
+          # Preuve volontaire : retirer une URL du bâti APRÈS un build vert,
+          # pour que seule la garde anti-perte refuse (avant rsync).
+          if [ -n "${{ inputs.preuve_sabotage_retire }}" ]; then
+            TARGET="$SRC/${{ inputs.preuve_sabotage_retire }}"
+            echo "PREUVE_SABOTAGE retire=$TARGET"
+            if [ ! -f "$TARGET" ]; then
+              echo "GATE_FAIL preuve_sabotage:fichier_absent:$TARGET"
+              exit 1
+            fi
+            rm -f "$TARGET"
+            echo "PREUVE_SABOTAGE_OK removed=$TARGET"
+          fi
 
       - name: Cle SSH de deploiement
         run: |
