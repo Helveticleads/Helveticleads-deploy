@@ -1,23 +1,23 @@
 import type { CorsOptions } from "cors";
+import { getActiveHostProfile } from "../config/runtime";
+import { DEV_ORIGINS, originsForDomains } from "../config/profiles";
 
-const DEFAULT_ORIGINS = [
-  "https://helvetic-garten.ch",
-  "https://www.helvetic-garten.ch",
-  "http://localhost:18547",
-  "http://127.0.0.1:18547",
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-];
-
-function parseAllowedOrigins(): string[] {
-  const fromEnv = process.env.ALLOWED_ORIGINS?.split(",")
-    .map((value) => value.trim())
+/**
+ * CORS allowlist is per host profile (servedDomains), not a shared IK-DE list.
+ * ALLOWED_ORIGINS env can add extras (comma-separated) without removing profile domains.
+ */
+export function allowedOriginsForActiveHost(): string[] {
+  const profile = getActiveHostProfile();
+  const fromProfile = originsForDomains(profile.servedDomains);
+  const fromEnv = (process.env.ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((v) => v.trim())
     .filter(Boolean);
-  return fromEnv?.length ? [...new Set([...DEFAULT_ORIGINS, ...fromEnv])] : DEFAULT_ORIGINS;
+  return [...new Set([...fromProfile, ...DEV_ORIGINS, ...fromEnv])];
 }
 
 export function getCorsOptions(): CorsOptions {
-  const allowed = parseAllowedOrigins();
+  const allowed = allowedOriginsForActiveHost();
 
   return {
     origin(origin, callback) {

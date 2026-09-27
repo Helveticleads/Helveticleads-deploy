@@ -1,14 +1,18 @@
-import type { SiteLanguage } from "../../reconciled/lead-core/src/types";
+import type { SiteLanguage } from "../../lead-core/src/types";
 
 /**
  * Host behaviour profile — photographs production quirks as configuration.
  * recipients.ts stays convention-based (prefix@domain); not configurable here.
+ *
+ * servedDomains: apex hostnames actually served on that VPS (nginx sites-enabled,
+ * 2026-09-27). CORS allows https://{d} and https://www.{d} for each entry.
  */
 export type ResponseStyle = "legacy" | "ikde";
 
 export type HostProfile = {
   id: string;
-  /** Normalize / validation language behaviour */
+  /** Apex domains this host serves — sole source of CORS allowlist (plus optional ALLOWED_ORIGINS). */
+  servedDomains: readonly string[];
   bilingualValidation: boolean;
   resolveSiteLanguageFromBody: boolean;
   defaultLanguage?: SiteLanguage;
@@ -16,19 +20,15 @@ export type HostProfile = {
   includeAddress: boolean;
   includeConsent: boolean;
   schaedlingeHeroAdapter: boolean;
-  /** City alias chain identity */
   cityChain: "hetzner" | "lws" | "fr" | "de";
-  /** Service alias chain */
   serviceChain: "hetzner" | "fr" | "de";
   phoneHasTelefon: boolean;
   messageHasNachricht: boolean;
   urgencyHasDringlichkeit: boolean;
   stepAnswersRichDe: boolean;
-  /** Route */
   honeypotFields: readonly string[];
   responseStyle: ResponseStyle;
   includeCrmLeadIdInResponse: boolean;
-  /** Delivery channels (what the host code *can* activate; env still required) */
   delivery: {
     usesDeliverLead: boolean;
     supportsCrmPush: boolean;
@@ -37,9 +37,37 @@ export type HostProfile = {
   };
 };
 
+/** Dev/loopback origins shared; never production site origins. */
+export const DEV_ORIGINS = [
+  "http://localhost:18547",
+  "http://127.0.0.1:18547",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+] as const;
+
+export function originsForDomains(domains: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const d of domains) {
+    const apex = d.replace(/^www\./, "").toLowerCase();
+    out.push(`https://${apex}`, `https://www.${apex}`);
+  }
+  return out;
+}
+
 export const PROFILES: Record<string, HostProfile> = {
   hetzner: {
     id: "hetzner",
+    servedDomains: [
+      "helvetic-dachdecker.ch",
+      "helvetic-daemmung.ch",
+      "helvetic-elektriker.ch",
+      "helvetic-glaserei.ch",
+      "helvetic-heizung.ch",
+      "helvetic-kaminfeger.ch",
+      "helvetic-rohrreinigung.ch",
+      "helvetic-sanitaer.ch",
+      "helvetic-schluesseldienst.ch",
+    ],
     bilingualValidation: false,
     resolveSiteLanguageFromBody: false,
     defaultSite: "helvetique-jardin.ch",
@@ -64,6 +92,26 @@ export const PROFILES: Record<string, HostProfile> = {
   },
   lws: {
     id: "lws",
+    servedDomains: [
+      "helvetique-assainissement.ch",
+      "helvetique-carrelage.ch",
+      "helvetique-chauffage.ch",
+      "helvetique-dentaire.ch",
+      "helvetique-electricite.ch",
+      "helvetique-ferronnerie.ch",
+      "helvetique-isolation.ch",
+      "helvetique-maconnerie.ch",
+      "helvetique-menuiserie.ch",
+      "helvetique-panneau-solaire.ch",
+      "helvetique-plaquiste.ch",
+      "helvetique-plomberie.ch",
+      "helvetique-ramonage.ch",
+      "helvetique-renovation-exterieure.ch",
+      "helvetique-renovation-interieure.ch",
+      "helvetique-serrurerie.ch",
+      "helvetique-toiture.ch",
+      "helvetique-vitrerie.ch",
+    ],
     bilingualValidation: false,
     resolveSiteLanguageFromBody: false,
     defaultSite: "helvetique-jardin.ch",
@@ -88,6 +136,21 @@ export const PROFILES: Record<string, HostProfile> = {
   },
   "infomaniak-fr": {
     id: "infomaniak-fr",
+    servedDomains: [
+      "helvetique-demenagements.ch",
+      "helvetique-elagage.ch",
+      "helvetique-evenementiel.ch",
+      "helvetique-ia.ch",
+      "helvetique-jardin.ch",
+      "helvetique-mariage.ch",
+      "helvetique-nettoyage.ch",
+      "helvetique-nuisibles.ch",
+      "helvetique-patrimoine.ch",
+      "helvetique-peinture.ch",
+      "helvetique-piscine.ch",
+      "helvetique-spa.ch",
+      "helvetique-web.ch",
+    ],
     bilingualValidation: false,
     resolveSiteLanguageFromBody: false,
     defaultLanguage: "fr",
@@ -113,6 +176,16 @@ export const PROFILES: Record<string, HostProfile> = {
   },
   "infomaniak-de": {
     id: "infomaniak-de",
+    servedDomains: [
+      "helvetic-garten.ch",
+      "helvetic-hochzeit.ch",
+      "helvetic-malerei.ch",
+      "helvetic-pool.ch",
+      "helvetic-reinigung.ch",
+      "helvetic-schaedlinge.ch",
+      "helvetic-vermoegen.ch",
+      "helvetic-whirlpool.ch",
+    ],
     bilingualValidation: true,
     resolveSiteLanguageFromBody: true,
     defaultLanguage: "de",
@@ -138,6 +211,14 @@ export const PROFILES: Record<string, HostProfile> = {
   },
   ionos: {
     id: "ionos",
+    servedDomains: [
+      "helvetique-terrassement.ch",
+      "debarrass-tout.be",
+      "domisane-suisse.ch",
+      "monexterminateursuisse.ch",
+      "monjardiniersuisse.ch",
+      "nuisibles-suisse.ch",
+    ],
     bilingualValidation: false,
     resolveSiteLanguageFromBody: false,
     defaultSite: "helvetique-jardin.ch",
