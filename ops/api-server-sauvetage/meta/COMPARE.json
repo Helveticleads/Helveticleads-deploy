@@ -1,0 +1,270 @@
+{
+  "hosts": [
+    "hetzner",
+    "lws",
+    "infomaniak-fr",
+    "infomaniak-de",
+    "ionos"
+  ],
+  "distinct_trees": {
+    "243709dd4816130c55b17f4870ed4f80ea21df0956307bcd3fb59f42b5735f1d": [
+      "hetzner"
+    ],
+    "e1e5ec102af1e16a54e2feee313d0973dc031bc82b5972efdca0a11b4a285a30": [
+      "lws"
+    ],
+    "49ac660588f1b06eb5aede07ec3c69670f8baf8ccffd2ed85d4effaef8f1aea0": [
+      "infomaniak-fr"
+    ],
+    "0bd9154f4b29fa0af21f8041993f5194b8eb4f750dd0c5b7b7f00edfc832a035": [
+      "infomaniak-de"
+    ],
+    "05e30f269773bb11666e4e3188585a960bb1ba51d621c52d22bebba4c4f3a8d2": [
+      "ionos"
+    ]
+  },
+  "files": [
+    {
+      "path": "api-zod/src/generated/api.ts",
+      "n_variants": 1,
+      "groups": {
+        "4696b75da77d": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "infomaniak-de",
+          "ionos"
+        ]
+      }
+    },
+    {
+      "path": "lead-core/src/email.ts",
+      "n_variants": 1,
+      "groups": {
+        "9170389982cf": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "infomaniak-de",
+          "ionos"
+        ]
+      }
+    },
+    {
+      "path": "lead-core/src/normalize.ts",
+      "n_variants": 5,
+      "groups": {
+        "5d2acaa6f8f1": [
+          "hetzner"
+        ],
+        "112fe7db6e79": [
+          "lws"
+        ],
+        "f9394f106124": [
+          "infomaniak-fr"
+        ],
+        "157aba690f94": [
+          "infomaniak-de"
+        ],
+        "ab4177ef2fe9": [
+          "ionos"
+        ]
+      }
+    },
+    {
+      "path": "lead-core/src/recipients.ts",
+      "n_variants": 1,
+      "groups": {
+        "511ab51980a0": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "infomaniak-de",
+          "ionos"
+        ]
+      }
+    },
+    {
+      "path": "lead-core/src/subject.ts",
+      "n_variants": 2,
+      "groups": {
+        "d8312230c11f": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "ionos"
+        ],
+        "bafedc4d2e97": [
+          "infomaniak-de"
+        ]
+      }
+    },
+    {
+      "path": "lead-core/src/template.ts",
+      "n_variants": 4,
+      "groups": {
+        "3313c41978d0": [
+          "hetzner"
+        ],
+        "599b7114a611": [
+          "lws"
+        ],
+        "bd34d9774e71": [
+          "infomaniak-fr",
+          "ionos"
+        ],
+        "47504e2c2380": [
+          "infomaniak-de"
+        ]
+      }
+    },
+    {
+      "path": "src/app.ts",
+      "n_variants": 2,
+      "groups": {
+        "72f19250d5ea": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "ionos"
+        ],
+        "4bd9a5d68b83": [
+          "infomaniak-de"
+        ]
+      }
+    },
+    {
+      "path": "src/index.ts",
+      "n_variants": 1,
+      "groups": {
+        "9c1f296e0008": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "infomaniak-de",
+          "ionos"
+        ]
+      }
+    },
+    {
+      "path": "src/lib/cors.ts",
+      "n_variants": 1,
+      "groups": {
+        "__MISSING__": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "ionos"
+        ],
+        "4ca9040c6101": [
+          "infomaniak-de"
+        ]
+      }
+    },
+    {
+      "path": "src/lib/logger.ts",
+      "n_variants": 1,
+      "groups": {
+        "29e1ca75036f": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "infomaniak-de",
+          "ionos"
+        ]
+      }
+    },
+    {
+      "path": "src/lib/securityHeaders.ts",
+      "n_variants": 1,
+      "groups": {
+        "__MISSING__": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "ionos"
+        ],
+        "c8ad8019c3de": [
+          "infomaniak-de"
+        ]
+      }
+    },
+    {
+      "path": "src/lib/webhook.ts",
+      "n_variants": 1,
+      "groups": {
+        "__MISSING__": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "ionos"
+        ],
+        "0430fc04a2fd": [
+          "infomaniak-de"
+        ]
+      }
+    },
+    {
+      "path": "src/routes/health.ts",
+      "n_variants": 1,
+      "groups": {
+        "0386ceddb4ff": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "infomaniak-de",
+          "ionos"
+        ]
+      }
+    },
+    {
+      "path": "src/routes/index.ts",
+      "n_variants": 1,
+      "groups": {
+        "8d277152f2d1": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr",
+          "infomaniak-de",
+          "ionos"
+        ]
+      }
+    },
+    {
+      "path": "src/routes/leads.ts",
+      "n_variants": 4,
+      "groups": {
+        "040d2d6536dd": [
+          "hetzner",
+          "lws"
+        ],
+        "c6479da48a10": [
+          "infomaniak-fr"
+        ],
+        "706eeb33fe24": [
+          "infomaniak-de"
+        ],
+        "f5c48d87d373": [
+          "ionos"
+        ]
+      }
+    },
+    {
+      "path": "src/services/deliver-lead.ts",
+      "n_variants": 2,
+      "groups": {
+        "c4fcff630add": [
+          "hetzner",
+          "lws",
+          "infomaniak-fr"
+        ],
+        "__MISSING__": [
+          "infomaniak-de"
+        ],
+        "89ee5ee254cb": [
+          "ionos"
+        ]
+      }
+    }
+  ]
+}

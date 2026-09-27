@@ -1,0 +1,2 @@
+2026-06-07 04:58:13.943475840 +0200 1458208 /opt/helvetic-api/app/artifacts/api-server/dist/index.mjs
+2026-06-07 04:58:13.943475840 +0200 2274191 /opt/helvetic-api/app/artifacts/api-server/dist/index.mjs.map

@@ -1,0 +1,149 @@
+[
+  {
+    "host": "hetzner",
+    "file": "lead-core/src/template.ts",
+    "nature": "destinataire_email_footer",
+    "action": "env:LEAD_EMAIL_FOOTER_CONTACT",
+    "rotation": true
+  },
+  {
+    "host": "hetzner",
+    "file": "lead-core/src/template.ts",
+    "nature": "contact_phone_literal",
+    "action": "env:LEAD_EMAIL_FOOTER_PHONE",
+    "rotation": true
+  },
+  {
+    "host": "hetzner",
+    "file": "lead-core/src/template.ts",
+    "nature": "contact_phone_literal",
+    "action": "env:LEAD_EMAIL_FOOTER_PHONE",
+    "rotation": true
+  },
+  {
+    "host": "hetzner",
+    "file": "lead-core/src/email.ts",
+    "nature": "expediteur_email_from_fallback",
+    "action": "env:FROM_EMAIL_only_no_literal",
+    "rotation": true
+  },
+  {
+    "host": "lws",
+    "file": "lead-core/src/template.ts",
+    "nature": "destinataire_email_footer",
+    "action": "env:LEAD_EMAIL_FOOTER_CONTACT",
+    "rotation": true
+  },
+  {
+    "host": "lws",
+    "file": "lead-core/src/template.ts",
+    "nature": "contact_phone_literal",
+    "action": "env:LEAD_EMAIL_FOOTER_PHONE",
+    "rotation": true
+  },
+  {
+    "host": "lws",
+    "file": "lead-core/src/template.ts",
+    "nature": "contact_phone_literal",
+    "action": "env:LEAD_EMAIL_FOOTER_PHONE",
+    "rotation": true
+  },
+  {
+    "host": "lws",
+    "file": "lead-core/src/email.ts",
+    "nature": "expediteur_email_from_fallback",
+    "action": "env:FROM_EMAIL_only_no_literal",
+    "rotation": true
+  },
+  {
+    "host": "infomaniak-fr",
+    "file": "lead-core/src/template.ts",
+    "nature": "destinataire_email_footer",
+    "action": "env:LEAD_EMAIL_FOOTER_CONTACT",
+    "rotation": true
+  },
+  {
+    "host": "infomaniak-fr",
+    "file": "lead-core/src/template.ts",
+    "nature": "contact_phone_literal",
+    "action": "env:LEAD_EMAIL_FOOTER_PHONE",
+    "rotation": true
+  },
+  {
+    "host": "infomaniak-fr",
+    "file": "lead-core/src/template.ts",
+    "nature": "contact_phone_literal",
+    "action": "env:LEAD_EMAIL_FOOTER_PHONE",
+    "rotation": true
+  },
+  {
+    "host": "infomaniak-fr",
+    "file": "lead-core/src/email.ts",
+    "nature": "expediteur_email_from_fallback",
+    "action": "env:FROM_EMAIL_only_no_literal",
+    "rotation": true
+  },
+  {
+    "host": "infomaniak-de",
+    "file": "lead-core/src/template.ts",
+    "nature": "destinataire_email_footer",
+    "action": "env:LEAD_EMAIL_FOOTER_CONTACT",
+    "rotation": true
+  },
+  {
+    "host": "infomaniak-de",
+    "file": "lead-core/src/template.ts",
+    "nature": "contact_phone_literal",
+    "action": "env:LEAD_EMAIL_FOOTER_PHONE",
+    "rotation": true
+  },
+  {
+    "host": "infomaniak-de",
+    "file": "lead-core/src/template.ts",
+    "nature": "contact_phone_literal",
+    "action": "env:LEAD_EMAIL_FOOTER_PHONE",
+    "rotation": true
+  },
+  {
+    "host": "infomaniak-de",
+    "file": "lead-core/src/email.ts",
+    "nature": "expediteur_email_from_fallback",
+    "action": "env:FROM_EMAIL_only_no_literal",
+    "rotation": true
+  },
+  {
+    "host": "ionos",
+    "file": "lead-core/src/template.ts",
+    "nature": "destinataire_email_footer",
+    "action": "env:LEAD_EMAIL_FOOTER_CONTACT",
+    "rotation": true
+  },
+  {
+    "host": "ionos",
+    "file": "lead-core/src/template.ts",
+    "nature": "contact_phone_literal",
+    "action": "env:LEAD_EMAIL_FOOTER_PHONE",
+    "rotation": true
+  },
+  {
+    "host": "ionos",
+    "file": "lead-core/src/template.ts",
+    "nature": "contact_phone_literal",
+    "action": "env:LEAD_EMAIL_FOOTER_PHONE",
+    "rotation": true
+  },
+  {
+    "host": "ionos",
+    "file": "lead-core/src/email.ts",
+    "nature": "expediteur_email_from_fallback",
+    "action": "env:FROM_EMAIL_only_no_literal",
+    "rotation": true
+  },
+  {
+    "host": "ionos",
+    "file": "src/services/deliver-lead.ts",
+    "nature": "adresse_service_crm_default",
+    "action": "removed_literal_require_env",
+    "rotation": false
+  }
+]
