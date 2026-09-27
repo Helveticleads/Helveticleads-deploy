@@ -1,4 +1,4 @@
-import { sendLeadEmail, type LeadData } from "@workspace/lead-core";
+import { sendLeadEmail, type LeadData } from "../../lead-core/src/index.ts";
 import { logger } from "../lib/logger";
 
 export type DeliveryResult = {

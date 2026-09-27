@@ -11,8 +11,9 @@
  */
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { sendLeadEmail, type LeadData } from "../../lead-core/src/index.ts";
+import { sendLeadEmail, type LeadData } from "@workspace/lead-core";
 import { logger } from "../lib/logger";
+import { getActiveHostProfile } from "../config/runtime";
 
 export type DeliveryResult = {
   delivered: boolean;
@@ -349,11 +350,14 @@ export async function deliverLead(
   lead: LeadData,
   ctx?: { host?: string },
 ): Promise<DeliveryResult> {
+  const profile = getActiveHostProfile();
   const hasResend = Boolean(getEnv("RESEND_API_KEY"));
-  const hasCrmPush = crmPushEnabled();
-  const hasLegacyWebhook = Boolean(
-    getEnv("CRM_WEBHOOK_URL") && !/\/api\/leads\/track/i.test(getEnv("CRM_WEBHOOK_URL") || ""),
-  );
+  const hasCrmPush = profile.delivery.supportsCrmPush && crmPushEnabled();
+  const hasLegacyWebhook =
+    profile.delivery.supportsLegacyCrmWebhook &&
+    Boolean(
+      getEnv("CRM_WEBHOOK_URL") && !/\/api\/leads\/track/i.test(getEnv("CRM_WEBHOOK_URL") || ""),
+    );
 
   if (!hasResend && !hasCrmPush && !hasLegacyWebhook) {
     logger.warn("Lead received but no delivery channel (RESEND_API_KEY / CRM_PUSH_ENABLED)");

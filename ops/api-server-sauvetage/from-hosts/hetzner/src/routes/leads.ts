@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { normalizeLegacyLeadBody } from "@workspace/lead-core";
+import { normalizeLegacyLeadBody } from "../../lead-core/src/index.ts";
 import { deliverLead } from "../services/deliver-lead";
 import { logger } from "../lib/logger";
 

@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { normalizeLegacyLeadBody, sendLeadEmail } from "@workspace/lead-core";
+import { normalizeLegacyLeadBody, sendLeadEmail } from "../../lead-core/src/index.ts";
 import { sendLeadWebhook } from "../lib/webhook";
 import { logger } from "../lib/logger";
 

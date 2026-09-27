@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { logger } from "./logger";
-import type { LeadData } from "../../lead-core/src/index.ts";
+import type { LeadData } from "@workspace/lead-core";
 
 const MAX_RETRIES = 2;
 
