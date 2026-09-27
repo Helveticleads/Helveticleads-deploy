@@ -52,4 +52,5 @@ Aucune des quatre valeurs littérales du sauvetage n’a été réintroduite. To
 
 ## Suite (pas maintenant)
 
-Choix de déploiement progressif, `HOST_PROFILE` en env systemd, et chantier réglages pour recipients.
+Bascule IONOS : prérequis construits (`index.ts` + `npm run build` + workflow CI).  
+Runbook corrigé : [BASCULE-IONOS.md](./BASCULE-IONOS.md). **STOP avant push / déploiement.**

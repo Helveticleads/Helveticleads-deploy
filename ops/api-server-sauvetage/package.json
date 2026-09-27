@@ -6,7 +6,10 @@
     "test:char": "vitest run characterization --reporter=verbose",
     "test:char:extract": "CHAR_TARGET=extract vitest run characterization --reporter=verbose",
     "test:char:reconciled": "CHAR_TARGET=reconciled vitest run characterization --reporter=verbose",
-    "test": "npm run test:char:extract && npm run test:char:reconciled"
+    "test": "npm run test:char:extract && npm run test:char:reconciled",
+    "build": "node scripts/build-reconciled.mjs",
+    "smoke:boot": "node scripts/smoke-boot.mjs",
+    "ci": "npm test && npm run build && HOST_PROFILE=ionos npm run smoke:boot"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -14,6 +17,7 @@
     "@types/node": "^22.10.0",
     "@types/supertest": "^6.0.2",
     "cors": "^2.8.5",
+    "esbuild": "^0.25.12",
     "express": "^4.21.2",
     "pino": "^9.5.0",
     "pino-http": "^10.3.0",

@@ -1,0 +1,33 @@
+# CI — api-server sauvetage (caractérisation + build reconciled)
+name: api-server-sauvetage
+
+on:
+  pull_request:
+    paths:
+      - "ops/api-server-sauvetage/**"
+      - ".github/workflows/api-server-sauvetage.yml"
+  push:
+    branches: [sauvetage/api-server-from-binaries]
+    paths:
+      - "ops/api-server-sauvetage/**"
+      - ".github/workflows/api-server-sauvetage.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: ops/api-server-sauvetage
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ops/api-server-sauvetage/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Characterization + build + smoke boot
+        run: npm run ci
