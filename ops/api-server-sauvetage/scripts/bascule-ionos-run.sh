@@ -217,88 +217,49 @@ rollback_now() {
 }
 
 # ========== C. Sonde ==========
-log "C. Sonde terrassement"
-PROBE_TS=$(TZ=$TZ_ZONE date +%Y%m%d-%H%M%S)
-PROBE_NAME="BASCULE-IONOS-PROBE-$PROBE_TS"
-PROBE_EMAIL="bascule-ionos-probe+${PROBE_TS}@premiumhelveticleads.ch"
-PROBE_PHONE="+41790000999"
-PROBE_MSG="PROBE bascule api-server IONOS $PROBE_TS — a supprimer"
-
-PROBE_FILE=$(mktemp)
-python3 - <<PY >"$PROBE_FILE"
-import json
-print(json.dumps({
-  "name": "$PROBE_NAME",
-  "phone": "$PROBE_PHONE",
-  "email": "$PROBE_EMAIL",
-  "message": "$PROBE_MSG",
-  "site": "helvetique-terrassement.ch",
-  "source_site": "helvetique-terrassement.ch",
-  "form_type": "lead",
-  "consent": True,
-}))
-PY
-scp -i "$KEY" -o BatchMode=yes -o IdentitiesOnly=yes "$PROBE_FILE" "$HOST:/tmp/bascule-ionos-probe.json"
-rm -f "$PROBE_FILE"
-
+# C. Sonde SANS création de lead.
+# Candidats mesurés sur les binaires :
+#   - GET /api/healthz → 200 {"status":"ok"}  (binaire live juillet)
+#   - GET /api/health  → 200 {"status":"ok"}  (arbre reconciled ; pas de healthz)
+#   - OPTIONS /api/leads → 204 (les deux ; ne discrimine pas les builds)
+#   - aucun en-tête de version / build id
+# Aucun ne prouve le pipeline lead (normalize + deliver) qu'un POST 201 prouvait.
+# On refuse donc le POST. Empreinte retenue pour UNE bascule vers reconciled :
+#   /api/health 200 + body ok  ET  /api/healthz 404  → le nouveau binaire répond,
+#   pas l'ancien. La preuve « lead path OK » attend une route de santé dédiée
+#   (ou un mode sonde CRM) — à ajouter avant de retenter une bascule métier.
+log "C. Sonde santé (pas de POST /api/leads)"
 PROBE_OUT=$(ssh_r 'set +e
-CODE=$(curl -sS -D /tmp/probe.hdr -o /tmp/probe.body -w "%{http_code}" \
-  -X POST "http://127.0.0.1:3000/api/leads" \
-  -H "Content-Type: application/json" \
-  -H "Host: helvetique-terrassement.ch" \
-  -H "Origin: https://helvetique-terrassement.ch" \
-  --data-binary @/tmp/bascule-ionos-probe.json)
-echo "$CODE"
-echo "---HDR---"
-cat /tmp/probe.hdr
-echo "---BODY---"
-cat /tmp/probe.body
-echo
+CODE_H=$(curl -sS -o /tmp/h.body -w "%{http_code}" --max-time 5 \
+  "http://127.0.0.1:3000/api/health")
+BODY_H=$(cat /tmp/h.body)
+CODE_Z=$(curl -sS -o /tmp/z.body -w "%{http_code}" --max-time 5 \
+  "http://127.0.0.1:3000/api/healthz")
+BODY_Z=$(cat /tmp/z.body)
+echo "HEALTH_HTTP=$CODE_H"
+echo "HEALTH_BODY=$BODY_H"
+echo "HEALTHZ_HTTP=$CODE_Z"
+echo "HEALTHZ_BODY=$BODY_Z"
 echo "---JOURNAL---"
-journalctl -u helvetic-api --since "2 minutes ago" --no-pager -o cat 2>/dev/null | grep -E "Lead received|Lead delivered|error|Error|HOST_PROFILE|CRM|Unknown host" | tail -40
-rm -f /tmp/bascule-ionos-probe.json
+journalctl -u helvetic-api --since "2 minutes ago" --no-pager -o cat 2>/dev/null \
+  | grep -E "error|Error|HOST_PROFILE|Unknown host|Error listening" | tail -40
 ')
 echo "$PROBE_OUT" | tee -a "$REPORT"
 
-HTTP_CODE=$(echo "$PROBE_OUT" | head -1 | tr -d '\r')
-if [ "$HTTP_CODE" != "201" ]; then
-  rollback_now "sonde HTTP=$HTTP_CODE (attendu 201)"
-fi
-if echo "$PROBE_OUT" | grep -qiE 'level.:50|"err"|Error listening|Unknown host profile'; then
-  # only fail on clear boot/profile errors in recent journal lines we printed
-  if echo "$PROBE_OUT" | grep -qE 'Unknown host profile|Error listening|HOST_PROFILE environment'; then
-    rollback_now "journal erreur critique après sonde"
-  fi
-fi
+CODE_H=$(echo "$PROBE_OUT" | awk -F= '/^HEALTH_HTTP=/{print $2; exit}' | tr -d '\r')
+BODY_H=$(echo "$PROBE_OUT" | awk -F= '/^HEALTH_BODY=/{print substr($0,13); exit}' | tr -d '\r')
+CODE_Z=$(echo "$PROBE_OUT" | awk -F= '/^HEALTHZ_HTTP=/{print $2; exit}' | tr -d '\r')
 
-LEAD_ID=$(echo "$PROBE_OUT" | python3 - <<'PY'
-import sys,re,json
-text=sys.stdin.read()
-# body after ---BODY---
-m=re.search(r'---BODY---\n(.*?)(?:\n---|\Z)', text, re.S)
-body=m.group(1).strip() if m else ""
-try:
-  o=json.loads(body)
-  print(o.get("lead_id") or "")
-except Exception:
-  print("")
-PY
-)
-CRM_ID=$(echo "$PROBE_OUT" | python3 - <<'PY'
-import sys,re,json
-text=sys.stdin.read()
-m=re.search(r'---BODY---\n(.*?)(?:\n---|\Z)', text, re.S)
-body=m.group(1).strip() if m else ""
-try:
-  o=json.loads(body)
-  v=o.get("crm_lead_id")
-  print(v if v is not None else "")
-except Exception:
-  print("")
-PY
-)
-echo "PROBE_LEAD_ID=$LEAD_ID" | tee -a "$REPORT"
-echo "PROBE_CRM_LEAD_ID=$CRM_ID" | tee -a "$REPORT"
+if [ "$CODE_H" != "200" ] || ! echo "$BODY_H" | grep -q '"status":"ok"'; then
+  rollback_now "sonde /api/health HTTP=$CODE_H body=$BODY_H (attendu 200 {\"status\":\"ok\"})"
+fi
+if [ "$CODE_Z" != "404" ]; then
+  rollback_now "sonde /api/healthz HTTP=$CODE_Z (attendu 404 — sinon ancien binaire encore actif)"
+fi
+if echo "$PROBE_OUT" | grep -qE 'Unknown host profile|Error listening|HOST_PROFILE environment'; then
+  rollback_now "journal erreur critique après sonde santé"
+fi
+echo "PROBE_HEALTH_OK /api/health=200 /api/healthz=404" | tee -a "$REPORT"
 
 # ========== CORS ==========
 log "CORS both directions"
@@ -325,26 +286,7 @@ if echo "$CORS_OUT" | grep -A2 'CORS block' | grep -qi 'helvetic-dachdecker.ch';
   rollback_now "CORS a autorisé origine Hetzner"
 fi
 
-# ========== Cleanup probe ==========
-log "Cleanup probe"
-CLEAN=$(ssh_r "set +e
-LEAD_ID='$LEAD_ID'
-CRM_ID='$CRM_ID'
-if [ -n \"\$LEAD_ID\" ] && [ -f /var/lib/helvetic-api/crm-sent/\$LEAD_ID ]; then
-  rm -f \"/var/lib/helvetic-api/crm-sent/\$LEAD_ID\"
-  echo CRM_SENT_REMOVED=\$LEAD_ID
-else
-  echo CRM_SENT_ABSENT_OR_NO_ID
-fi
-# CRM fiche: pas d API admin locale — signaler pour retrait manuel
-if [ -n \"\$CRM_ID\" ]; then
-  echo CRM_LEAD_NEEDS_UI_DELETE=\$CRM_ID
-else
-  echo CRM_LEAD_ID_UNKNOWN
-fi
-echo CLEAN_NAME=$PROBE_NAME
-")
-echo "$CLEAN" | tee -a "$REPORT"
+# Plus de cleanup CRM : la sonde ne crée plus de lead.
 
 END="$(TZ=$TZ_ZONE date -Iseconds)"
 log "END=$END"
