@@ -228,6 +228,13 @@ rollback_now() {
 #   /api/health 200 + body ok  ET  /api/healthz 404  → le nouveau binaire répond,
 #   pas l'ancien. La preuve « lead path OK » attend une route de santé dédiée
 #   (ou un mode sonde CRM) — à ajouter avant de retenter une bascule métier.
+#
+# EMPREINTE TRANSITION-ONLY — ne pas réutiliser à l'aveugle :
+#   health 200 + healthz 404 reconnaît le passage juillet(healthz) → reconciled(health).
+#   Ce n'est PAS « le bon binaire » en général : un autre build valide pourrait
+#   garder healthz, renommer autrement, ou servir health sans être reconciled.
+#   Toute bascule ultérieure exige une empreinte propre (build id / HOST_PROFILE
+#   exposé) — pas ce couple de routes.
 log "C. Sonde santé (pas de POST /api/leads)"
 PROBE_OUT=$(ssh_r 'set +e
 CODE_H=$(curl -sS -o /tmp/h.body -w "%{http_code}" --max-time 5 \
