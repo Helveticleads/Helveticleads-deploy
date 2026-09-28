@@ -17,8 +17,9 @@ En cas d’anomalie : rollback immédiat, STOP. Pas d’aller-retour entre les �
 | SSH | `deploy@212.227.76.165` (clé `~/.ssh/id_ed25519_ionos`) |
 | `API` | `/opt/helvetic-api/app/artifacts/api-server` |
 | Unité systemd | `helvetic-api` |
-| Env file | `/etc/helvetic/api.env` |
-| `HOST_PROFILE` | `ionos` |
+| Secrets env | `/etc/helvetic/api.env` — **ne pas lire/écrire** (hors périmètre bascule) |
+| `HOST_PROFILE` | via `EnvironmentFile` sans secret : `$API/host-profile.env` + drop-in systemd (ci-dessous) |
+| Snapshot juillet | `$API/dist.snapshot-20260728-050451` (copie du `dist` live Jul 28) |
 | Fenêtre | **22:00 Europe/Zurich** |
 | Sonde — domaine | `helvetique-terrassement.ch` (0 lead / 7 j. ; **pas** monjardinier / monexterminateur) |
 | Sonde — exclus | `monjardiniersuisse.ch`, `monexterminateursuisse.ch`, `debarrass-tout.be` |
@@ -29,6 +30,22 @@ En cas d’anomalie : rollback immédiat, STOP. Pas d’aller-retour entre les �
 
 Prérequis binaire (déjà dans le dépôt) : `npm run build` → `dist/index.mjs` ; boot exige `HOST_PROFILE`.  
 Ancien binaire (tous hôtes mesurés) : n’exige que `PORT` → ignore `HOST_PROFILE` tant qu’il tourne.
+
+### HOST_PROFILE — hors api.env
+
+1. **Fichier sans secret** (posé par `deploy`) :  
+   `/opt/helvetic-api/app/artifacts/api-server/host-profile.env`  
+   contenu unique : `HOST_PROFILE=ionos`
+
+2. **Drop-in systemd** (root — sudoers actuel de `deploy` **ne le permet pas**) :  
+   `/etc/systemd/system/helvetic-api.service.d/10-host-profile.conf`
+   ```
+   [Service]
+   EnvironmentFile=-/opt/helvetic-api/app/artifacts/api-server/host-profile.env
+   ```
+   En posant le drop-in (aujourd’hui) : **`systemctl daemon-reload` une fois, sans restart** — sinon
+   le `restart` de 22h peut encore ignorer le drop-in (unité en cache). Le reload ne coupe pas le service.  
+   Optionnel plus tard : étendre sudoers pour que `deploy` puisse installer ce seul fichier.
 
 ---
 
@@ -155,9 +172,9 @@ Première anomalie (drill, is-active, lead) → exécuter le `rollback-*.sh` (ou
 
 ## Ordre jour J — IONOS (applique paramètres + procédure)
 
-1. **A** Drill → is-active t+0 / t+60 → retirer `dist.drill-*` + `rollback-drill-*`.
-2. Poser reconciled dans `dist.new/`.
-3. `HOST_PROFILE=ionos` dans `/etc/helvetic/api.env`.
+1. Prérequis déjà posés le jour J : `host-profile.env` + drop-in + `daemon-reload` (sans restart) + snapshot juillet.
+2. **A** Drill → is-active t+0 / t+60 → retirer `dist.drill-*` + `rollback-drill-*`.
+3. Poser reconciled dans `dist.new/`.
 4. **B** Écrire `rollback-<STAMP>.sh` dans `$API/` → renames → restart → is-active t+0 / t+60.
 5. **C** Sonde `helvetique-terrassement.ch` / `BASCULE-IONOS-PROBE-…` → nettoyage.
 6. Sinon **D** rollback + STOP.

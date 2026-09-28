@@ -1,0 +1,62 @@
+BASCULE IONOS REPORT
+====================
+BEGIN=2026-09-27T22:00:01+02:00
+
+> build
+> node scripts/build-reconciled.mjs
+
+
+  dist/index.mjs      1.3mb ⚠️
+  dist/index.mjs.map  2.0mb
+
+⚡ Done in 111ms
+built /Users/fred/Helveticleads/Helveticleads-deploy/ops/api-server-sauvetage/dist/index.mjs
+id=deploy
+active
+is_active_rc=0
+api_w=1
+host_profile_env=ok
+dropin=present
+july_snapshot=ok
+DRILL_STAMP=20260927-220004
+DRILL_ACTIVE_T0=active
+DRILL_ACTIVE_T60=active
+DRILL_CLEAN=ok
+STAGE_OK
+HOST_PROFILE_PATH_OK
+BAK_STAMP=20260927-220110
+ACTIVE_T0=active
+ACTIVE_T60=active
+JOURNAL_ERR_LEVEL50=0
+BASCULE_OK stamp=20260927-220110
+500
+---HDR---
+HTTP/1.1 500 Internal Server Error
+X-Powered-By: Express
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: geolocation=(), microphone=(), camera=()
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+Content-Security-Policy: default-src 'none'
+Content-Type: text/html; charset=utf-8
+Content-Length: 148
+Date: Sun, 27 Sep 2026 20:02:12 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+---BODY---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Error</title>
+</head>
+<body>
+<pre>Internal Server Error</pre>
+</body>
+</html>
+
+---JOURNAL---
+active
+FAIL: sonde HTTP=500 (attendu 201) (rollback done)
