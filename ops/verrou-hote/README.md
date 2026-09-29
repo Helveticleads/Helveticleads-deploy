@@ -14,13 +14,22 @@ les callers `workflow_call` mouraient en 0 s. #8 a revert pour rétablir les dé
 
 ## Expiration (STALE)
 
-Défaut **`STALE_SEC=1800` (30 min)**.
+Défaut **`STALE_SEC=3600` (60 min)**.
 
-- Un Deploy site dure en pratique ~5–15 min ; 30 min ≈ 2× le chemin lent sans bloquer la nuit.
-- Si le runner meurt sans `relacher`, un autre job reprend après 30 min (log `LOCK_STALE_RECLAIM`).
+- Un Deploy site observé (20–27) max ≈ 3 min ; 60 min laisse de la marge pour une bascule api
+  lente sans voler le verrou en cours.
+- Si le runner meurt sans `relacher`, un autre job reprend après 60 min (log `LOCK_STALE_RECLAIM`).
+  Prix : un orphelin bloque l’hôte une heure — moins cher qu’un vol mid-bascule.
 - `WAIT_MAX_SEC=5400` (90 min) : plafond d’attente du job avant `LOCK_TIMEOUT`.
   Distinct de STALE : WAIT_MAX = combien on attend son tour ; STALE = âge max de
   `taken_at` avant `LOCK_STALE_RECLAIM` (pas de heartbeat du holder).
+- Pas de reprise automatique après `LOCK_TIMEOUT` : échec propre, relance manuelle.
+
+## Dette (après le 1er)
+
+**Heartbeat** — le holder doit rafraîchir `taken_at` pendant qu’il travaille.
+Aujourd’hui : *STALE sans heartbeat traite un deploy long comme un orphelin*.
+À faire à froid après le 1er ; jusqu’là STALE=3600 est le garde-fou grossier.
 
 ## Couverture
 
