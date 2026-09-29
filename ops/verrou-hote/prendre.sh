@@ -90,12 +90,14 @@ while true; do
   fi
   now=$(now_epoch)
   if [ "$now" -ge "$deadline" ]; then
-    log "LOCK_TIMEOUT holder=$owner since=$taken wait_max_sec=$WAIT_MAX_SEC — pas de déploiement"
+    log "LOCK_TIMEOUT holder=$owner since=$taken wait_max_sec=$WAIT_MAX_SEC — pas de déploiement (échec propre, pas de retry automatique)"
+    log "LOCK_ESCAPE : ssh deploy@\$HOST 'rm -rf \$HOME/.helveticleads-deploy-lock'  — doc : ops/verrou-hote/liberer-manuel.sh"
     echo "LOCK_HELD=0"
     exit 1
   fi
   if [ "$first" = "1" ]; then
     log "LOCK_WAIT holder=$owner since=$taken poll=${WAIT_POLL_SEC}s max=${WAIT_MAX_SEC}s"
+    log "LOCK_ESCAPE si orphelin (STALE ${STALE_SEC}s sinon) : ssh deploy@\$HOST 'rm -rf \$HOME/.helveticleads-deploy-lock'  — ou ops/verrou-hote/liberer-manuel.sh"
     first=0
   else
     log "LOCK_WAIT_STILL holder=$owner since=$taken remaining_sec=$((deadline - now))"

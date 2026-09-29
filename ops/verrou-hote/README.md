@@ -29,6 +29,18 @@ Les 16 publications manuelles (rsync hors Actions) restent hors verrou.
 
 Step `if: always() && steps.verrou.outputs.held == '1'` — échec, annulation, succès.
 
+## Sortie de secours (orphelin)
+
+Si un job meurt sans relâcher et que STALE n’est pas encore atteint, le log
+`LOCK_WAIT` / `LOCK_TIMEOUT` affiche :
+
+```bash
+ssh deploy@<HOST> 'rm -rf $HOME/.helveticleads-deploy-lock'
+```
+
+Équivalent versionné : `ops/verrou-hote/liberer-manuel.sh` (même effet, avec journal
+owner/taken_at). Pas besoin de lire tout le dépôt : la commande est dans le log Actions.
+
 ## Preuves locales
 
 ```bash

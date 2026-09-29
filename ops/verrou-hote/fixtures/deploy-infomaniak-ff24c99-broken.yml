@@ -1,3 +1,4 @@
+# Fixture figée : YAML de #7 (ff24c99) — heredoc verrou en colonne 0 dans run:| ; actionlint doit le rejeter.
 name: Deploy front to Infomaniak VPS
 
 on:
