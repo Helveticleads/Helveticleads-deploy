@@ -18,7 +18,9 @@ Défaut **`STALE_SEC=1800` (30 min)**.
 
 - Un Deploy site dure en pratique ~5–15 min ; 30 min ≈ 2× le chemin lent sans bloquer la nuit.
 - Si le runner meurt sans `relacher`, un autre job reprend après 30 min (log `LOCK_STALE_RECLAIM`).
-- `WAIT_MAX_SEC=2700` (45 min) : plafond d’attente si l’autre deploy est encore vivant.
+- `WAIT_MAX_SEC=5400` (90 min) : plafond d’attente du job avant `LOCK_TIMEOUT`.
+  Distinct de STALE : WAIT_MAX = combien on attend son tour ; STALE = âge max de
+  `taken_at` avant `LOCK_STALE_RECLAIM` (pas de heartbeat du holder).
 
 ## Couverture
 

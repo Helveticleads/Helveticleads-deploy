@@ -10,7 +10,7 @@
 #   LOCK_RUN_URL URL Actions (optionnel)
 #   STALE_SEC    âge max avant reprise (défaut 1800 = 30 min)
 #                Au-delà, un autre deploy peut reprendre le verrou (job tué / runner mort).
-#   WAIT_MAX_SEC attente max (défaut 2700 = 45 min)
+#   WAIT_MAX_SEC attente max (défaut 5400 = 90 min)
 #   WAIT_POLL_SEC intervalle de poll (défaut 15)
 #   VERROU_DISABLED=1  neutralise (preuve grade 2) — ne prend rien
 set -euo pipefail
@@ -19,7 +19,7 @@ LOCK_DIR="${LOCK_DIR:-$HOME/.helveticleads-deploy-lock}"
 LOCK_OWNER="${LOCK_OWNER:?LOCK_OWNER manquant}"
 LOCK_RUN_URL="${LOCK_RUN_URL:-}"
 STALE_SEC="${STALE_SEC:-1800}"
-WAIT_MAX_SEC="${WAIT_MAX_SEC:-2700}"
+WAIT_MAX_SEC="${WAIT_MAX_SEC:-5400}"
 WAIT_POLL_SEC="${WAIT_POLL_SEC:-15}"
 
 log() { printf '%s\n' "$*" >&2; }

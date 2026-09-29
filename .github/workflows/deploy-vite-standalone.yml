@@ -113,7 +113,7 @@ jobs:
           set +e
           ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes \
             "deploy@${HOST}" \
-            "env LOCK_OWNER=$(printf %q "$LOCK_OWNER") LOCK_RUN_URL=$(printf %q "$LOCK_RUN_URL") STALE_SEC=1800 WAIT_MAX_SEC=2700 WAIT_POLL_SEC=15 bash -s" \
+            "env LOCK_OWNER=$(printf %q "$LOCK_OWNER") LOCK_RUN_URL=$(printf %q "$LOCK_RUN_URL") STALE_SEC=1800 WAIT_MAX_SEC=5400 WAIT_POLL_SEC=15 bash -s" \
             < "$SCRIPT" | tee "$OUT"
           rc=${PIPESTATUS[0]}
           set -e
