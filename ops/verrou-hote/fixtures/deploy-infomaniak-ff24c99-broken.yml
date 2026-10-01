@@ -1,3 +1,4 @@
+# Fixture figée : YAML de #7 (ff24c99) — heredoc verrou en colonne 0 dans run:| ; actionlint doit le rejeter.
 name: Deploy front to Infomaniak VPS
 
 on:
@@ -20,16 +21,6 @@ on:
         required: false
         type: string
         default: "/"
-      preuve_sabotage_retire:
-        description: "PREUVE UNIQUEMENT — chemin relatif sous dist/public à supprimer après build (ex. anliegen/index.html). La garde anti-perte doit alors refuser avant rsync."
-        required: false
-        type: string
-        default: ""
-
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   deploy:
@@ -61,9 +52,6 @@ jobs:
           PORT: "10000"
           BASE_PATH: "/"
           NODE_ENV: production
-          # Ne pas laisser DOMAIN (= inputs.domain) polluer generate-sitemap :
-          # sous pnpm --filter, ça préfixe les URLs et fait échouer sitemap-eq.
-          DOMAIN: ""
         run: pnpm --filter ${{ inputs.artifact }} run build
 
       - name: Gates build-time
@@ -91,19 +79,6 @@ jobs:
 
           echo "GATE_OK build_local"
 
-          # Preuve volontaire : retirer une URL du bâti APRÈS un build vert,
-          # pour que seule la garde anti-perte refuse (avant rsync).
-          if [ -n "${{ inputs.preuve_sabotage_retire }}" ]; then
-            TARGET="$SRC/${{ inputs.preuve_sabotage_retire }}"
-            echo "PREUVE_SABOTAGE retire=$TARGET"
-            if [ ! -f "$TARGET" ]; then
-              echo "GATE_FAIL preuve_sabotage:fichier_absent:$TARGET"
-              exit 1
-            fi
-            rm -f "$TARGET"
-            echo "PREUVE_SABOTAGE_OK removed=$TARGET"
-          fi
-
       - name: Cle SSH de deploiement
         run: |
           mkdir -p ~/.ssh
@@ -111,16 +86,6 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H ${{ inputs.host }} >> ~/.ssh/known_hosts 2>/dev/null
 
-      # Scripts verrou : dépôt Helveticleads-deploy (pas le caller). Pas de heredoc YAML.
-      - name: Scripts verrou hôte
-        uses: actions/checkout@v4
-        with:
-          repository: Helveticleads/Helveticleads-deploy
-          path: _verrou_hote
-          sparse-checkout: |
-            ops/verrou-hote
-          sparse-checkout-cone-mode: false
-          token: ${{ secrets.JETON_LECTURE_DEPOTS }}
 
       - name: Prendre verrou hôte
         id: verrou
@@ -130,23 +95,178 @@ jobs:
           LOCK_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          # Couverture : sites via ce workflow ; 16 rsync manuels hors verrou.
-          SCRIPT="_verrou_hote/ops/verrou-hote/prendre.sh"
-          test -f "$SCRIPT"
-          OUT=$(mktemp)
+          # Couverture : 40/56 sites. 16 rsync manuels hors verrou.
+          SCRIPT=$(mktemp)
+          cat > "$SCRIPT" <<'VERROU_PRENDRE_EOF'
+#!/usr/bin/env bash
+# Prise du verrou par hôte — s'exécute SUR la machine cible (ou en local avec LOCK_DIR).
+#
+# Mécanisme : mkdir atomique. Sur un FS Linux, mkdir échoue si le répertoire
+# existe déjà → une seule prise gagne. Pas de « test puis create ».
+#
+# Variables :
+#   LOCK_DIR     chemin du verrou (défaut : $HOME/.helveticleads-deploy-lock)
+#   LOCK_OWNER   identité du run (ex. Helveticleads/site@123456)
+#   LOCK_RUN_URL URL Actions (optionnel)
+#   STALE_SEC    âge max avant reprise (défaut 1500 = 25 min)
+#   WAIT_MAX_SEC attente max (défaut 2700 = 45 min)
+#   WAIT_POLL_SEC intervalle de poll (défaut 15)
+#   VERROU_DISABLED=1  neutralise (preuve grade 2) — ne prend rien
+set -euo pipefail
+
+LOCK_DIR="${LOCK_DIR:-$HOME/.helveticleads-deploy-lock}"
+LOCK_OWNER="${LOCK_OWNER:?LOCK_OWNER manquant}"
+LOCK_RUN_URL="${LOCK_RUN_URL:-}"
+STALE_SEC="${STALE_SEC:-1500}"
+WAIT_MAX_SEC="${WAIT_MAX_SEC:-2700}"
+WAIT_POLL_SEC="${WAIT_POLL_SEC:-15}"
+
+log() { printf '%s\n' "$*" >&2; }
+
+if [ "${VERROU_DISABLED:-0}" = "1" ]; then
+  log "VERROU_DISABLED=1 — prise ignorée (mode preuve / neutralisation)"
+  echo "LOCK_HELD=0"
+  exit 0
+fi
+
+now_epoch() { date -u +%s; }
+now_iso() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+
+read_owner() { cat "$LOCK_DIR/owner" 2>/dev/null || echo "?"; }
+read_taken() { cat "$LOCK_DIR/taken_at" 2>/dev/null || echo "?"; }
+read_taken_epoch() {
+  local iso
+  iso=$(read_taken)
+  date -u -d "$iso" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$iso" +%s 2>/dev/null || echo 0
+}
+
+write_meta() {
+  printf '%s\n' "$LOCK_OWNER" > "$LOCK_DIR/owner"
+  printf '%s\n' "$(now_iso)" > "$LOCK_DIR/taken_at"
+  if [ -n "$LOCK_RUN_URL" ]; then
+    printf '%s\n' "$LOCK_RUN_URL" > "$LOCK_DIR/run_url"
+  fi
+}
+
+try_acquire() {
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    write_meta
+    log "LOCK_ACQUIRED owner=$LOCK_OWNER taken_at=$(read_taken) dir=$LOCK_DIR"
+    echo "LOCK_HELD=1"
+    return 0
+  fi
+  return 1
+}
+
+reclaim_if_stale() {
+  local taken age owner
+  taken=$(read_taken_epoch)
+  if [ "$taken" = "0" ]; then
+    return 1
+  fi
+  age=$(( $(now_epoch) - taken ))
+  if [ "$age" -le "$STALE_SEC" ]; then
+    return 1
+  fi
+  owner=$(read_owner)
+  log "LOCK_STALE_RECLAIM owner=$owner taken_at=$(read_taken) age_sec=$age stale_sec=$STALE_SEC — reprise bruyante"
+  rm -rf "$LOCK_DIR"
+  return 0
+}
+
+deadline=$(( $(now_epoch) + WAIT_MAX_SEC ))
+first=1
+while true; do
+  if try_acquire; then
+    exit 0
+  fi
+  owner=$(read_owner)
+  taken=$(read_taken)
+  if reclaim_if_stale; then
+    if try_acquire; then
+      exit 0
+    fi
+  fi
+  now=$(now_epoch)
+  if [ "$now" -ge "$deadline" ]; then
+    log "LOCK_TIMEOUT holder=$owner since=$taken wait_max_sec=$WAIT_MAX_SEC — pas de déploiement"
+    echo "LOCK_HELD=0"
+    exit 1
+  fi
+  if [ "$first" = "1" ]; then
+    log "LOCK_WAIT holder=$owner since=$taken poll=${WAIT_POLL_SEC}s max=${WAIT_MAX_SEC}s"
+    first=0
+  else
+    log "LOCK_WAIT_STILL holder=$owner since=$taken remaining_sec=$((deadline - now))"
+  fi
+  sleep "$WAIT_POLL_SEC"
+done
+VERROU_PRENDRE_EOF
           set +e
-          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes \
-            "deploy@${HOST}" \
-            "env LOCK_OWNER=$(printf %q "$LOCK_OWNER") LOCK_RUN_URL=$(printf %q "$LOCK_RUN_URL") STALE_SEC=3600 WAIT_MAX_SEC=5400 WAIT_POLL_SEC=15 bash -s" \
-            < "$SCRIPT" | tee "$OUT"
-          rc=${PIPESTATUS[0]}
+          OUT=$(ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes \
+            "deploy@$HOST" \
+            "env LOCK_OWNER=$(printf %q "$LOCK_OWNER") LOCK_RUN_URL=$(printf %q "$LOCK_RUN_URL") STALE_SEC=1500 WAIT_MAX_SEC=2700 WAIT_POLL_SEC=15 bash -s" \
+            < "$SCRIPT" 2>&1)
+          rc=$?
           set -e
-          if grep -q '^LOCK_HELD=1$' "$OUT"; then
+          printf '%s\n' "$OUT"
+          if printf '%s\n' "$OUT" | grep -q 'LOCK_HELD=1'; then
             echo "held=1" >> "$GITHUB_OUTPUT"
+            echo "LOCK_ACQUIRED_OK"
           else
             echo "held=0" >> "$GITHUB_OUTPUT"
           fi
+          rm -f "$SCRIPT"
           exit "$rc"
+
+      - name: Relâcher verrou hôte
+        if: always() && steps.verrou.outputs.held == '1'
+        env:
+          HOST: ${{ inputs.host }}
+          LOCK_OWNER: ${{ github.repository }}@${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SCRIPT=$(mktemp)
+          cat > "$SCRIPT" <<'VERROU_RELACHER_EOF'
+#!/usr/bin/env bash
+# Relâche du verrou par hôte — uniquement si nous en sommes le propriétaire.
+# S'exécute SUR la machine cible (ou en local avec LOCK_DIR).
+#
+# Variables :
+#   LOCK_DIR    (défaut $HOME/.helveticleads-deploy-lock)
+#   LOCK_OWNER  identité qui avait pris le verrou
+#   VERROU_DISABLED=1  no-op
+set -euo pipefail
+
+LOCK_DIR="${LOCK_DIR:-$HOME/.helveticleads-deploy-lock}"
+LOCK_OWNER="${LOCK_OWNER:?LOCK_OWNER manquant}"
+
+log() { printf '%s\n' "$*" >&2; }
+
+if [ "${VERROU_DISABLED:-0}" = "1" ]; then
+  log "VERROU_DISABLED=1 — relâche ignorée"
+  exit 0
+fi
+
+if [ ! -d "$LOCK_DIR" ]; then
+  log "LOCK_RELEASE_SKIP absent dir=$LOCK_DIR"
+  exit 0
+fi
+
+current=$(cat "$LOCK_DIR/owner" 2>/dev/null || echo "")
+if [ "$current" != "$LOCK_OWNER" ]; then
+  log "LOCK_SKIP_RELEASE foreign_owner=${current:-?} self=$LOCK_OWNER — on ne touche pas"
+  exit 0
+fi
+
+rm -rf "$LOCK_DIR"
+log "LOCK_RELEASED owner=$LOCK_OWNER dir=$LOCK_DIR"
+VERROU_RELACHER_EOF
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes \
+            "deploy@$HOST" \
+            "env LOCK_OWNER=$(printf %q "$LOCK_OWNER") bash -s" \
+            < "$SCRIPT" || echo "LOCK_RELEASE_WARN rc=$?"
+          rm -f "$SCRIPT"
 
       - name: Deploiement atomique gaté
         run: |
@@ -169,8 +289,7 @@ jobs:
 
           rollback() {
             if [ -n "${PREV:-}" ] && [ "$PREV" != "$BASE/current" ] && "${SSH_CMD[@]}" "test -d '$PREV'"; then
-              "${SSH_CMD[@]}" \
-                "ln -sfn '$PREV' '$BASE/.current.tmp' && mv -Tf '$BASE/.current.tmp' '$BASE/current'"
+              "${SSH_CMD[@]}" "ln -sfn '$PREV' '$BASE/current'"
               echo "ROLLBACK→$PREV"
             else
               echo "ROLLBACK_SKIP: PREV vide/invalide (${PREV:-∅})"
@@ -182,151 +301,12 @@ jobs:
           PREV="$("${SSH_CMD[@]}" "readlink '$BASE/current'" 2>/dev/null || true)"
           echo "PREV=$PREV"
 
-          # ── Garde anti-perte v2 (portée #127 + migrations 301 mesurées) ──
-          # Aucune URL indexée servie ne doit disparaître SANS 301 HTTP
-          # vérifiée vers une cible du bâti. Mesure, pas checklist.
-          # Vérifié AVANT d'écrire. Ensemble vide ≠ feu vert.
-          SERVI=$(mktemp); BATI=$(mktemp); CAND=$(mktemp)
-          trap 'rm -f "$SERVI" "$BATI" "$CAND"' EXIT
-          if ! "${SSH_CMD[@]}" \
-            "cd '$BASE/current' && find -L . -name index.html | sed 's|^\\./||;s|/index.html\$||;s|^index.html\$|/|' | LC_ALL=C sort" \
-            > "$SERVI" 2>/dev/null; then
-            echo "GATE_FAIL anti_perte:SSH_ou_current_absent"
-            exit 1
-          fi
-          (cd "$SRC" && find -L . -name index.html | sed 's|^\./||;s|/index.html$||;s|^index.html$|/|' | LC_ALL=C sort) > "$BATI"
-          NS=$(grep -c . "$SERVI" || true)
-          NB=$(grep -c . "$BATI" || true)
-          if [ "$NS" -eq 0 ]; then
-            echo "GATE_FAIL anti_perte:servi=0 (mauvais hôte, current absent, ou site vide)"
-            exit 1
-          fi
-          if [ "$NB" -eq 0 ]; then
-            echo "GATE_FAIL anti_perte:bati=0 (build vide)"
-            exit 1
-          fi
-          comm -23 "$SERVI" "$BATI" > "$CAND"
-
-          # path inventaire → URL. Sonde LES DEUX formes (avec/sans "/") :
-          # une location = sans variante "/" laisse encore répondre 200.
-          path_to_url() {
-            local p="$1"
-            if [ "$p" = "/" ]; then echo "https://$DOMAIN/"; else echo "https://$DOMAIN/$p"; fi
-          }
-          # Location → path inventaire (sans slash final, sauf "/").
-          loc_to_path() {
-            local loc="$1" path
-            path=$(printf '%s' "$loc" | sed -E 's|^[a-zA-Z]+://[^/]+||; s|\?.*||; s|#.*||')
-            [ -z "$path" ] && path="/"
-            if [ "$path" != "/" ]; then path=$(printf '%s' "$path" | sed 's|/$||'); path=${path#/}; fi
-            printf '%s' "$path"
-          }
-          # Suit au plus 2 sauts 301/308. Succès si une cible tombe dans BATI.
-          follow_migration() {
-            local url="$1" hops=0 code loc path
-            while [ "$hops" -lt 2 ]; do
-              code=$(curl -sS -o /dev/null -D /tmp/anti_perte_hdrs -w '%{http_code}' \
-                --max-time 15 -H 'Cache-Control: no-store' "$url" || echo 000)
-              case "$code" in
-                301|308) ;;
-                *) return 1 ;;
-              esac
-              loc=$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/,""); gsub(/\r/,""); print; exit}' \
-                /tmp/anti_perte_hdrs)
-              [ -n "$loc" ] || return 1
-              case "$loc" in
-                http://*|https://*)
-                  case "$loc" in
-                    "http://$DOMAIN"|"http://$DOMAIN/"*|"https://$DOMAIN"|"https://$DOMAIN/"*) ;;
-                    *) return 1 ;;
-                  esac
-                  ;;
-                /*) loc="https://$DOMAIN$loc" ;;
-                *) return 1 ;;
-              esac
-              path=$(loc_to_path "$loc")
-              if grep -Fxq "$path" "$BATI"; then
-                printf '%s' "$path"
-                return 0
-              fi
-              url="$loc"
-              hops=$((hops + 1))
-            done
-            return 1
-          }
-          # Les deux formes doivent migrer (sauf "/"). Diagnostics → stderr ;
-          # stdout = uniquement la cible inventaire si OK.
-          probe_one_form() {
-            local url="$1" code
-            code=$(curl -sS -o /dev/null -D /tmp/anti_perte_hdrs -w '%{http_code}' \
-              --max-time 15 -H 'Cache-Control: no-store' "$url" || echo 000)
-            case "$code" in
-              301|308)
-                if cible=$(follow_migration "$url"); then
-                  echo "ok:$cible"
-                  return 0
-                fi
-                echo "fail:301_cible_hors_bati_ou_chaine"
-                return 1
-                ;;
-              *)
-                echo "fail:http_$code"
-                return 1
-                ;;
-            esac
-          }
-          probe_both_forms() {
-            local p="$1" u0 r0 r1 c0
-            if [ "$p" = "/" ]; then
-              r0=$(probe_one_form "https://$DOMAIN/") || {
-                echo "  sonde: / → $r0" >&2
-                return 1
-              }
-              c0=${r0#ok:}
-              echo "  sonde: / → 301→$c0" >&2
-              printf '%s' "$c0"
-              return 0
-            fi
-            u0=$(path_to_url "$p")
-            r0=$(probe_one_form "$u0") || true
-            r1=$(probe_one_form "$u0/") || true
-            echo "  sonde: /$p → $r0" >&2
-            echo "  sonde: /$p/ → $r1" >&2
-            case "$r0" in ok:*) ;; *) return 1 ;; esac
-            case "$r1" in ok:*) ;; *) return 1 ;; esac
-            c0=${r0#ok:}
-            printf '%s' "$c0"
-            return 0
-          }
-
-          MIGREES=0
-          PERDUES=0
-          while IFS= read -r p || [ -n "$p" ]; do
-            [ -z "$p" ] && continue
-            if cible=$(probe_both_forms "$p"); then
-              MIGREES=$((MIGREES + 1))
-              echo "  migree: $p → $cible"
-            else
-              PERDUES=$((PERDUES + 1))
-              echo "  manquante: $p (pas de 301→bati sur les deux formes)"
-            fi
-          done < "$CAND"
-
-          if [ "$PERDUES" -gt 0 ]; then
-            echo "GATE_FAIL anti_perte:perdues=$PERDUES migrees=$MIGREES servi=$NS bati=$NB — déploiement refusé"
-            exit 1
-          fi
-          echo "GATE_OK anti_perte servi=$NS bati=$NB perdues=0 migrees=$MIGREES"
-
           retry rsync -avz --delete \
             -e "$RSYNC_SSH" \
             "$SRC/" \
             "deploy@$HOST:$BASE/releases/$TS/"
 
-          # Bascule atomique : rename() via tmp — pas de fenêtre où current
-          # n'existe pas (ln -sfn = unlink puis symlink → 404 possible).
-          retry "${SSH_CMD[@]}" \
-            "ln -sfn '$BASE/releases/$TS' '$BASE/.current.tmp' && mv -Tf '$BASE/.current.tmp' '$BASE/current'"
+          retry "${SSH_CMD[@]}" "ln -sfn '$BASE/releases/$TS' '$BASE/current'"
           echo "GATE_OK symlink"
 
           # Courte pause : laisse nginx / éventuel cache fichier digérer la bascule.
@@ -439,17 +419,3 @@ jobs:
           echo "GATE_OK post_assets"
           echo "GATE_OK render"
           echo "GATE_OK deploy_complete"
-
-      - name: Relâcher verrou hôte
-        if: always() && steps.verrou.outputs.held == '1'
-        env:
-          HOST: ${{ inputs.host }}
-          LOCK_OWNER: ${{ github.repository }}@${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          SCRIPT="_verrou_hote/ops/verrou-hote/relacher.sh"
-          test -f "$SCRIPT"
-          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes \
-            "deploy@${HOST}" \
-            "env LOCK_OWNER=$(printf %q "$LOCK_OWNER") bash -s" \
-            < "$SCRIPT"

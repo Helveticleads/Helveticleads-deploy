@@ -1,0 +1,60 @@
+# Verrou par hôte v2
+
+Mutex sur la **machine cible** (`mkdir $HOME/.helveticleads-deploy-lock`), pas dans GitHub.
+Deux sites du même VPS s’attendent ; deux hôtes restent parallèles.
+
+## Pourquoi v2 (après #7 / #8)
+
+#7 embarquait `prendre.sh` / `relacher.sh` dans un heredoc à l’intérieur d’un `run: |`.
+Le corps du script était collé en **colonne 0** → YAML du workflow réutilisable invalide →
+les callers `workflow_call` mouraient en 0 s. #8 a revert pour rétablir les déploiements.
+
+**v2 :** scripts versionnés sous `ops/verrou-hote/`, exécutés par
+`ssh … bash -s < ops/verrou-hote/prendre.sh` — aucun heredoc de script dans le YAML.
+
+## Expiration (STALE)
+
+Défaut **`STALE_SEC=3600` (60 min)**.
+
+- Un Deploy site observé (20–27) max ≈ 3 min ; 60 min laisse de la marge pour une bascule api
+  lente sans voler le verrou en cours.
+- Si le runner meurt sans `relacher`, un autre job reprend après 60 min (log `LOCK_STALE_RECLAIM`).
+  Prix : un orphelin bloque l’hôte une heure — moins cher qu’un vol mid-bascule.
+- `WAIT_MAX_SEC=5400` (90 min) : plafond d’attente du job avant `LOCK_TIMEOUT`.
+  Distinct de STALE : WAIT_MAX = combien on attend son tour ; STALE = âge max de
+  `taken_at` avant `LOCK_STALE_RECLAIM` (pas de heartbeat du holder).
+- Pas de reprise automatique après `LOCK_TIMEOUT` : échec propre, relance manuelle.
+
+## Dette (après le 1er)
+
+**Heartbeat** — le holder doit rafraîchir `taken_at` pendant qu’il travaille.
+Aujourd’hui : *STALE sans heartbeat traite un deploy long comme un orphelin*.
+À faire à froid après le 1er ; jusqu’là STALE=3600 est le garde-fou grossier.
+
+## Couverture
+
+Workflows réutilisables `deploy-infomaniak.yml` et `deploy-vite-standalone.yml` (~40 sites).
+Les 16 publications manuelles (rsync hors Actions) restent hors verrou.
+
+## Relâche
+
+Step `if: always() && steps.verrou.outputs.held == '1'` — échec, annulation, succès.
+
+## Sortie de secours (orphelin)
+
+Si un job meurt sans relâcher et que STALE n’est pas encore atteint, le log
+`LOCK_WAIT` / `LOCK_TIMEOUT` affiche :
+
+```bash
+ssh deploy@<HOST> 'rm -rf $HOME/.helveticleads-deploy-lock'
+```
+
+Équivalent versionné : `ops/verrou-hote/liberer-manuel.sh` (même effet, avec journal
+owner/taken_at). Pas besoin de lire tout le dépôt : la commande est dans le log Actions.
+
+## Preuves locales
+
+```bash
+bash ops/verrou-hote/preuves.sh
+bash ops/verrou-hote/preuve-actionlint.sh
+```
