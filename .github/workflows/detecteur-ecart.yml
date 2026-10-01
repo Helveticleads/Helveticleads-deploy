@@ -30,6 +30,11 @@ on:
       - "ops/detecteur-ecart/**"
       - ".github/workflows/detecteur-ecart.yml"
 
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
   issues: write

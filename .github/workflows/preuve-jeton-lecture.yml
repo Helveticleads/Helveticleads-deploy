@@ -8,6 +8,11 @@ on:
     branches: [feat/detecteur-ecart]
     paths: [.github/workflows/preuve-jeton-lecture.yml]
 
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   preuve:
     runs-on: ubuntu-latest
