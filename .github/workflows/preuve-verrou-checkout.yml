@@ -3,6 +3,12 @@ name: preuve-verrou-checkout
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/preuve-verrou-checkout.yml"
+      - ".github/workflows/deploy-infomaniak.yml"
+      - ".github/workflows/deploy-vite-standalone.yml"
+      - "ops/verrou-hote/**"
 
 permissions:
   contents: read
