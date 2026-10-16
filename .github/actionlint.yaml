@@ -1,0 +1,6 @@
+# Bruit shellcheck SC2013 preexistant sur les scripts deploy (for x in $(cat ...)).
+# La garde utile reste la syntaxe YAML (#7).
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      - 'shellcheck reported issue in this script: SC2013:.+'

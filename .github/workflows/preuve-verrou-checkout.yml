@@ -1,0 +1,36 @@
+# Preuve : checkout sparse de ops/verrou-hote sans token: (dépôt public).
+name: preuve-verrou-checkout
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/preuve-verrou-checkout.yml"
+      - ".github/workflows/deploy-infomaniak.yml"
+      - ".github/workflows/deploy-vite-standalone.yml"
+      - "ops/verrou-hote/**"
+
+permissions:
+  contents: read
+
+jobs:
+  preuve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sparse ops/verrou-hote (sans token)
+        uses: actions/checkout@v4
+        with:
+          repository: Helveticleads/Helveticleads-deploy
+          path: _verrou_hote
+          sparse-checkout: |
+            ops/verrou-hote
+          sparse-checkout-cone-mode: false
+
+      - name: Lister scripts verrou
+        run: |
+          set -euo pipefail
+          ls -la _verrou_hote/ops/verrou-hote/
+          test -f _verrou_hote/ops/verrou-hote/prendre.sh
+          test -f _verrou_hote/ops/verrou-hote/relacher.sh
+          echo "PREUVE_OK prendre.sh et relacher.sh presents"
+

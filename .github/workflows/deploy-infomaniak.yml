@@ -112,6 +112,7 @@ jobs:
           ssh-keyscan -H ${{ inputs.host }} >> ~/.ssh/known_hosts 2>/dev/null
 
       # Scripts verrou : dépôt Helveticleads-deploy (pas le caller). Pas de heredoc YAML.
+      # Pas de token : ce dépôt est public et le checkout utilise le jeton par défaut. Un secret nommé ici n'est pas hérité par les 53 appelants et a figé leurs déploiements du 1er au 16 octobre 2026.
       - name: Scripts verrou hôte
         uses: actions/checkout@v4
         with:
@@ -120,7 +121,6 @@ jobs:
           sparse-checkout: |
             ops/verrou-hote
           sparse-checkout-cone-mode: false
-          token: ${{ secrets.JETON_LECTURE_DEPOTS }}
 
       - name: Prendre verrou hôte
         id: verrou
