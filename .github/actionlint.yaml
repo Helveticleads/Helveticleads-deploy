@@ -1,0 +1,5 @@
+# SC2013 (for x in $(...)) : bruits shellcheck info sur les scripts deploy
+# déjà présents avant le retrait du token ; la garde reste la syntaxe YAML (#7).
+shellcheck:
+  ignore:
+    - SC2013
