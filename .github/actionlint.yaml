@@ -1,5 +1,6 @@
-# SC2013 (for x in $(...)) : bruits shellcheck info sur les scripts deploy
-# déjà présents avant le retrait du token ; la garde reste la syntaxe YAML (#7).
-shellcheck:
-  ignore:
-    - SC2013
+# Bruit shellcheck SC2013 preexistant sur les scripts deploy (for x in $(cat ...)).
+# La garde utile reste la syntaxe YAML (#7).
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      - 'shellcheck reported issue in this script: SC2013:.+'

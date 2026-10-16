@@ -9,6 +9,7 @@ on:
       - ".github/workflows/**"
       - "ops/verrou-hote/fixtures/**"
       - "ops/verrou-hote/preuve-actionlint.sh"
+      - ".github/actionlint.yaml"
 
 permissions:
   contents: read
