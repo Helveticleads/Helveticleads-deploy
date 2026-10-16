@@ -33,3 +33,4 @@ jobs:
           test -f _verrou_hote/ops/verrou-hote/prendre.sh
           test -f _verrou_hote/ops/verrou-hote/relacher.sh
           echo "PREUVE_OK prendre.sh et relacher.sh presents"
+
