@@ -56,3 +56,11 @@ jobs:
           set -euo pipefail
           bash ops/deploy-verdict/preuve-derive.sh ops/deploy-verdict/kpi-verdicts.sh
           bash ops/deploy-verdict/kpi-verdicts.sh
+
+      - name: Sonde épinglage
+        env:
+          GH_TOKEN: ${{ secrets.JETON_LECTURE_DEPOTS || github.token }}
+          REPOS_FILE: ops/deploy-verdict/repos-appelants.txt
+        run: |
+          set -euo pipefail
+          bash ops/deploy-verdict/sonde-epingle.sh | tee -a "$GITHUB_STEP_SUMMARY"
