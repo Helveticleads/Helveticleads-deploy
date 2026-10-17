@@ -26,10 +26,13 @@ on:
         type: string
         default: ""
 
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   deploy:
@@ -69,6 +72,8 @@ jobs:
       - name: Gates build-time
         run: |
           set -euo pipefail
+          VERDICT_FILE="${RUNNER_TEMP:-/tmp}/deploy-verdict.txt"
+          gate_fail() { local msg="GATE_FAIL $*"; echo "$msg"; printf '%s\n' "$msg" >> "$VERDICT_FILE"; }
           PKG_DIR="$(pnpm --filter "$ARTIFACT" exec node -e 'process.stdout.write(process.cwd())')"
           SRC="$PKG_DIR/dist/public"
           echo "SRC=$SRC"
@@ -76,16 +81,16 @@ jobs:
           echo "SRC=$SRC" >> "$GITHUB_ENV"
 
           # 1) index.html present
-          test -f "$SRC/index.html" || { echo "GATE_FAIL build:index_html_absent"; exit 1; }
+          test -f "$SRC/index.html" || { gate_fail "build:index_html_absent"; exit 1; }
 
           # 2) asset coherence: each /assets/*.js|css referenced exists locally
           for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' "$SRC/index.html" | sort -u); do
-            test -f "$SRC$r" || { echo "GATE_FAIL build:asset_manquant:$r"; exit 1; }
+            test -f "$SRC$r" || { gate_fail "build:asset_manquant:$r"; exit 1; }
           done
 
           # 3) anti bare-ref (SITE_CONFIG page blanche) — FORBIDDEN_BARE_REFS verbatim
           if grep -REl 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE' "$SRC/assets/" 2>/dev/null; then
-            echo "GATE_FAIL build:reference_nue_SITE_CONFIG"
+            gate_fail "build:reference_nue_SITE_CONFIG"
             exit 1
           fi
 
@@ -97,7 +102,7 @@ jobs:
             TARGET="$SRC/${{ inputs.preuve_sabotage_retire }}"
             echo "PREUVE_SABOTAGE retire=$TARGET"
             if [ ! -f "$TARGET" ]; then
-              echo "GATE_FAIL preuve_sabotage:fichier_absent:$TARGET"
+              gate_fail "preuve_sabotage:fichier_absent:$TARGET"
               exit 1
             fi
             rm -f "$TARGET"
@@ -120,6 +125,7 @@ jobs:
           path: _verrou_hote
           sparse-checkout: |
             ops/verrou-hote
+            ops/deploy-verdict
           sparse-checkout-cone-mode: false
 
       - name: Prendre verrou hôte
@@ -151,6 +157,8 @@ jobs:
       - name: Deploiement atomique gaté
         run: |
           set -euo pipefail
+          VERDICT_FILE="${RUNNER_TEMP:-/tmp}/deploy-verdict.txt"
+          gate_fail() { local msg="GATE_FAIL $*"; echo "$msg"; printf '%s\n' "$msg" >> "$VERDICT_FILE"; }
           TS=$(date +%Y%m%d-%H%M%S)
           BASE="/var/www/$DOMAIN"
           SSH_OPTS=(-i ~/.ssh/id_ed25519)
@@ -191,18 +199,18 @@ jobs:
           if ! "${SSH_CMD[@]}" \
             "cd '$BASE/current' && find -L . -name index.html | sed 's|^\\./||;s|/index.html\$||;s|^index.html\$|/|' | LC_ALL=C sort" \
             > "$SERVI" 2>/dev/null; then
-            echo "GATE_FAIL anti_perte:SSH_ou_current_absent"
+            gate_fail "anti_perte:SSH_ou_current_absent"
             exit 1
           fi
           (cd "$SRC" && find -L . -name index.html | sed 's|^\./||;s|/index.html$||;s|^index.html$|/|' | LC_ALL=C sort) > "$BATI"
           NS=$(grep -c . "$SERVI" || true)
           NB=$(grep -c . "$BATI" || true)
           if [ "$NS" -eq 0 ]; then
-            echo "GATE_FAIL anti_perte:servi=0 (mauvais hôte, current absent, ou site vide)"
+            gate_fail "anti_perte:servi=0 (mauvais hôte, current absent, ou site vide)"
             exit 1
           fi
           if [ "$NB" -eq 0 ]; then
-            echo "GATE_FAIL anti_perte:bati=0 (build vide)"
+            gate_fail "anti_perte:bati=0 (build vide)"
             exit 1
           fi
           comm -23 "$SERVI" "$BATI" > "$CAND"
@@ -313,7 +321,7 @@ jobs:
           done < "$CAND"
 
           if [ "$PERDUES" -gt 0 ]; then
-            echo "GATE_FAIL anti_perte:perdues=$PERDUES migrees=$MIGREES servi=$NS bati=$NB — déploiement refusé"
+            gate_fail "anti_perte:perdues=$PERDUES migrees=$MIGREES servi=$NS bati=$NB — déploiement refusé"
             exit 1
           fi
           echo "GATE_OK anti_perte servi=$NS bati=$NB perdues=0 migrees=$MIGREES"
@@ -342,7 +350,7 @@ jobs:
           # absent de la nouvelle release (vu garten 2026-09-16, run 35055051643).
           code=$("${CURL_NOSTORE[@]}" -o /tmp/root.html -w '%{http_code}' "https://$DOMAIN$SMOKE_PATH" || echo 000)
           if ! { [ "$code" = "200" ] && grep -q 'id="root"' /tmp/root.html; }; then
-            echo "GATE_FAIL post:http_root:$code"
+            gate_fail "post:http_root:$code"
             rollback
             exit 1
           fi
@@ -356,7 +364,7 @@ jobs:
               sleep $((attempt * 2))
             done
             if [ "$ac" != "200" ]; then
-              echo "GATE_FAIL post:asset:$r:$ac"
+              gate_fail "post:asset:$r:$ac"
               rollback
               exit 1
             fi
@@ -413,14 +421,14 @@ jobs:
             rc=$?
             set -e
             if   [ "$rc" = 0 ]; then echo "GATE_OK render_playwright"; render_ok=1
-            elif [ "$rc" = 2 ]; then echo "GATE_FAIL render_playwright:page"; rollback; exit 1
+            elif [ "$rc" = 2 ]; then gate_fail "render_playwright:page"; rollback; exit 1
             else                      echo "render: Playwright infra KO (rc=$rc) -> repli heuristique"
             fi
           fi
           if [ -z "$render_ok" ]; then
             for u in $(grep -oE '/[A-Za-z0-9._/-]*assets/[A-Za-z0-9._-]+\.js' /tmp/root.html | head -n3); do
               if curl -fsS "https://$DOMAIN$u" | grep -Eq 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE'; then
-                echo "GATE_FAIL render_heuristic:bare_ref_live"
+                gate_fail "render_heuristic:bare_ref_live"
                 rollback
                 exit 1
               fi
@@ -439,6 +447,35 @@ jobs:
           echo "GATE_OK post_assets"
           echo "GATE_OK render"
           echo "GATE_OK deploy_complete"
+
+      - name: Notifier échec deploy (issue persistante)
+        if: failure()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VERDICT_FILE: ${{ runner.temp }}/deploy-verdict.txt
+        run: |
+          set -euo pipefail
+          SCRIPT="_verrou_hote/ops/deploy-verdict/notifier-echec.sh"
+          test -f "$SCRIPT"
+          bash "_verrou_hote/ops/deploy-verdict/preuve-derive.sh" "$SCRIPT"
+          bash "$SCRIPT"
+
+      - name: Clôturer verdicts après succès
+        if: success()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SCRIPT="_verrou_hote/ops/deploy-verdict/cloturer-succes.sh"
+          test -f "$SCRIPT"
+          bash "_verrou_hote/ops/deploy-verdict/preuve-derive.sh" "$SCRIPT"
+          bash "$SCRIPT"
 
       - name: Relâcher verrou hôte
         if: always() && steps.verrou.outputs.held == '1'

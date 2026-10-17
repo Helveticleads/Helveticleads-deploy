@@ -1,0 +1,46 @@
+# Sonde permanente : refs @v1 vs @main, écart main↔v1, âge de v1.
+# Parle même à zéro écart.
+name: sonde-epingle
+
+on:
+  schedule:
+    - cron: "20 7 * * *" # quotidien 07:20 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sonde:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lister les dépôts appelants
+        env:
+          GH_TOKEN: ${{ secrets.JETON_LECTURE_DEPOTS || github.token }}
+        run: |
+          set -euo pipefail
+          OUT=ops/deploy-verdict/repos-appelants.txt
+          mkdir -p ops/deploy-verdict
+          : > "$OUT"
+          gh api orgs/Helveticleads/repos --paginate --jq '.[].full_name' \
+            | while read -r repo; do
+                raw=$(gh api "repos/$repo/contents/.github/workflows/deploy.yml" --jq .content 2>/dev/null || true)
+                [ -z "$raw" ] && continue
+                if printf '%s' "$raw" | base64 -d 2>/dev/null | grep -q 'deploy-infomaniak.yml'; then
+                  echo "$repo" >> "$OUT"
+                fi
+              done
+          wc -l "$OUT"
+
+      - name: Sonde épinglage
+        env:
+          GH_TOKEN: ${{ secrets.JETON_LECTURE_DEPOTS || github.token }}
+          REPOS_FILE: ops/deploy-verdict/repos-appelants.txt
+        run: |
+          set -euo pipefail
+          chmod +x ops/deploy-verdict/sonde-epingle.sh
+          bash ops/deploy-verdict/sonde-epingle.sh | tee /tmp/sonde.md
+          cat /tmp/sonde.md >> "$GITHUB_STEP_SUMMARY"

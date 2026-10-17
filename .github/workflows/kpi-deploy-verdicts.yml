@@ -1,0 +1,66 @@
+# KPI : croise runs Deploy en échec × verdicts notifiés (double dénominateur).
+name: kpi-deploy-verdicts
+
+on:
+  schedule:
+    - cron: "15 7 * * 1" # lundi 07:15 UTC
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: "Fenêtre en jours"
+        required: false
+        default: "7"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  kpi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer gh (runner)
+        run: gh --version
+
+      - name: Lister les dépôts appelants (Deploy)
+        id: repos
+        env:
+          GH_TOKEN: ${{ secrets.JETON_LECTURE_DEPOTS || github.token }}
+        run: |
+          set -euo pipefail
+          OUT=ops/deploy-verdict/repos-appelants.txt
+          mkdir -p ops/deploy-verdict
+          : > "$OUT"
+          # Dépôts org Helveticleads dont le workflow Deploy appelle deploy-infomaniak
+          gh api orgs/Helveticleads/repos --paginate --jq '.[].full_name' \
+            | while read -r repo; do
+                raw=$(gh api "repos/$repo/contents/.github/workflows/deploy.yml" --jq .content 2>/dev/null || true)
+                [ -z "$raw" ] && continue
+                if printf '%s' "$raw" | base64 -d 2>/dev/null | grep -q 'deploy-infomaniak.yml'; then
+                  echo "$repo" >> "$OUT"
+                fi
+              done
+          echo "repos=$(wc -l < "$OUT" | tr -d ' ')" >> "$GITHUB_OUTPUT"
+          head -5 "$OUT" || true
+
+      - name: Mesurer KPI (double dénominateur)
+        env:
+          GH_TOKEN: ${{ secrets.JETON_LECTURE_DEPOTS || github.token }}
+          REPOS_FILE: ops/deploy-verdict/repos-appelants.txt
+          WINDOW_DAYS: ${{ inputs.window_days || '7' }}
+          REPORT_REPO: Helveticleads/Helveticleads-deploy
+        run: |
+          set -euo pipefail
+          bash ops/deploy-verdict/preuve-derive.sh ops/deploy-verdict/kpi-verdicts.sh
+          bash ops/deploy-verdict/kpi-verdicts.sh
+
+      - name: Sonde épinglage
+        env:
+          GH_TOKEN: ${{ secrets.JETON_LECTURE_DEPOTS || github.token }}
+          REPOS_FILE: ops/deploy-verdict/repos-appelants.txt
+        run: |
+          set -euo pipefail
+          bash ops/deploy-verdict/sonde-epingle.sh | tee -a "$GITHUB_STEP_SUMMARY"
