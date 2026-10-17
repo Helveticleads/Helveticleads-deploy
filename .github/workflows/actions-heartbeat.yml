@@ -1,0 +1,23 @@
+# Témoin hors process : prouve que GitHub Actions tourne encore.
+# L'observateur CRM (/opt/psl-observateur) lit la dernière run schedule via
+# l'API publique. Aucun SSH, aucun secret, aucune surface sur le VPS.
+name: actions-heartbeat
+
+on:
+  schedule:
+    # Horaire, décalé des autres crons du dépôt. GitHub peut retarder / sauter :
+    # le seuil côté observateur est volontairement large (6 h).
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  battement:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Témoin
+        run: |
+          set -euo pipefail
+          echo "ok $(date -u +%Y-%m-%dT%H:%M:%SZ)"
