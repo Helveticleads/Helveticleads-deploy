@@ -104,13 +104,17 @@ Mesure au $NOW — fenêtre ${WINDOW_DAYS} j (depuis $SINCE).
 | Runs Deploy en échec | **$n_deploy_fail** |
 | Verdicts notifiés (commentaires \`## Verdict\`, hors sabotage) | **$n_verdicts_notifies** |
 | Écart (échecs − notifiés) | **$ecart** |
-| \`VERDICT NON NOTIFIÉ\` vu dans les logs | **$n_non_notifie_log** |
+| \`VERDICT NON NOTIFIÉ\` vu dans les logs (sous-ensemble diagnostique) | **$n_non_notifie_log** |
 | Issues ouvertes sans suite ≥ ${WINDOW_DAYS} j | **$n_sans_suite_7j** |
 | Issues/threads sabotage exclus | $n_sabotage_excl |
 
 ## Lecture
 
-- Si **écart > 0** ou **VERDICT NON NOTIFIÉ > 0** : la notification est dégradée — ce n'est **pas** « parc sain ».
+- **L'écart est le signal.** Un run en échec sans commentaire \`## Verdict\` gonfle l'écart ;
+  un \`VERDICT NON NOTIFIÉ\` y est déjà inclus (échec compté, notifié = 0).
+- **Ne pas additionner** écart + NON NOTIFIÉ : le second est un *sous-ensemble diagnostique*
+  de l'écart (panne d'écriture d'issue visible dans le résumé), pas un second compteur.
+- Si **écart > 0** : la notification est dégradée ou absente — ce n'est **pas** « parc sain ».
 - Si écart = 0 et sans_suite bas : le branchement sert.
 - Les issues \`deploy-sabotage\` sont exclues du dénominateur notifié.
 
