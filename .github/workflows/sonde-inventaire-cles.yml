@@ -1,0 +1,25 @@
+# Sonde permanente : dispersion de DEPLOY_SSH_KEY (noms + dates, jamais de valeur).
+name: sonde-inventaire-cles
+
+on:
+  schedule:
+    - cron: "40 7 * * *" # quotidien 07:40 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sonde:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inventaire des clés
+        env:
+          GH_TOKEN: ${{ secrets.JETON_LECTURE_DEPOTS || github.token }}
+        run: |
+          set -euo pipefail
+          chmod +x ops/inventaire-cles/sonde-inventaire-cles.sh
+          python3 ops/inventaire-cles/sonde-inventaire-cles.py | tee /tmp/inventaire-cles.md
+          cat /tmp/inventaire-cles.md >> "$GITHUB_STEP_SUMMARY"
