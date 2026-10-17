@@ -29,3 +29,9 @@ Le KPI croise runs Deploy en échec × verdicts produits ; un écart signale cet
 Ces scripts ne s’installent **nulle part** hors du dépôt. Le workflow les exécute
 depuis le checkout sparse de `Helveticleads/Helveticleads-deploy` (`ops/deploy-verdict/`).
 `preuve-derive.sh` refuse tout autre préfixe de chemin.
+
+## KPI — lecture de l'écart
+
+- **Écart** = échecs Deploy − verdicts notifiés (signal).
+- **VERDICT NON NOTIFIÉ** = sous-ensemble diagnostique de l'écart (ne pas additionner).
+- **Reste sans explication** = écart − NON NOTIFIÉ — toujours affiché, même à 0.
