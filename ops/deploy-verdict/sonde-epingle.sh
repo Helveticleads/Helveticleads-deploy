@@ -8,12 +8,15 @@ DEPLOY_REPO="${DEPLOY_REPO:-Helveticleads/Helveticleads-deploy}"
 REPOS_FILE="${REPOS_FILE:?REPOS_FILE manquant}"
 
 main_sha=$(gh api "repos/$DEPLOY_REPO/commits/main" --jq .sha)
-v1_sha=$(gh api "repos/$DEPLOY_REPO/git/ref/tags/v1" --jq .object.sha 2>/dev/null || echo "")
-# annotated tag → peel
-if [ -n "$v1_sha" ]; then
-  typ=$(gh api "repos/$DEPLOY_REPO/git/objects/$v1_sha" --jq .type 2>/dev/null || echo "")
-  if [ "$typ" = "tag" ]; then
-    v1_sha=$(gh api "repos/$DEPLOY_REPO/git/objects/$v1_sha" --jq .object.sha)
+v1_ref=$(gh api "repos/$DEPLOY_REPO/git/ref/tags/v1" 2>/dev/null || echo "")
+v1_sha=""
+if [ -n "$v1_ref" ]; then
+  obj_type=$(printf '%s' "$v1_ref" | jq -r .object.type)
+  obj_sha=$(printf '%s' "$v1_ref" | jq -r .object.sha)
+  if [ "$obj_type" = "tag" ]; then
+    v1_sha=$(gh api "repos/$DEPLOY_REPO/git/tags/$obj_sha" --jq .object.sha)
+  else
+    v1_sha=$obj_sha
   fi
 fi
 
