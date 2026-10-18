@@ -7,7 +7,6 @@ on:
     paths:
       - ".github/workflows/preuve-verrou-checkout.yml"
       - ".github/workflows/deploy-infomaniak.yml"
-      - ".github/workflows/deploy-vite-standalone.yml"
       - "ops/verrou-hote/**"
 
 permissions:
@@ -32,5 +31,6 @@ jobs:
           ls -la _verrou_hote/ops/verrou-hote/
           test -f _verrou_hote/ops/verrou-hote/prendre.sh
           test -f _verrou_hote/ops/verrou-hote/relacher.sh
+          test -f _verrou_hote/ops/verrou-hote/battement.sh
           echo "PREUVE_OK prendre.sh et relacher.sh presents"
 

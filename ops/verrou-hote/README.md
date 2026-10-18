@@ -22,25 +22,19 @@ Défaut **`STALE_SEC=3600` (60 min)**.
   Prix : un orphelin bloque l’hôte une heure — moins cher qu’un vol mid-bascule.
 - `WAIT_MAX_SEC=5400` (90 min) : plafond d’attente du job avant `LOCK_TIMEOUT`.
   Distinct de STALE : WAIT_MAX = combien on attend son tour ; STALE = âge max de
-  `taken_at` avant `LOCK_STALE_RECLAIM` (pas de heartbeat du holder).
+  `taken_at` avant `LOCK_STALE_RECLAIM` (le battement s'est tu avec le runner).
 - Pas de reprise automatique après `LOCK_TIMEOUT` : échec propre, relance manuelle.
 
-## Heartbeat — décision du 2026-10-18
+## Heartbeat
 
-Pas de heartbeat. Décision, pas dette.
+Posé dans l'étape de déploiement de `deploy-infomaniak.yml`. `battement.sh`
+réécrit `taken_at` dans une session `ssh` tenue par le runner, sans `nohup`.
+La fin du step tue cette session. Si le runner meurt, ssh tombe, la boucle
+reçoit SIGHUP, `taken_at` s'arrête, et `STALE` (60 min) reprend le verrou.
+`relacher.sh` retire le répertoire dès que le job finit.
 
-Un holder vivant dont `taken_at` dépasse 60 min peut être repris (`LOCK_STALE_RECLAIM`).
-Les Deploy durent quelques minutes, le seuil est loin. Un hôte bloqué un dimanche
-soir coûte plus cher que le risque couvert.
-
-Fermer le trou sans bloquer l’hôte : le rafraîchissement de `taken_at` doit mourir
-avec le job. Une session `ssh` tenue par le runner, sans `nohup`, réécrit `taken_at`
-tant que le déploiement tourne. Si le runner meurt, la session tombe, la boucle
-reçoit SIGHUP, `taken_at` cesse, et `STALE` reprend le verrou au bout de 60 min.
-`relacher.sh` retire le répertoire tout de suite quand le job se termine.
-Ce qui bloquerait l’hôte jusqu’à un `rm` : un `nohup` ou un `disown`, qui
-continuerait à rafraîchir après la mort du job. C’est exclu. Coût non posé :
-une session ssh ouverte le temps du rsync, une dizaine de lignes.
+La forme écartée le 2026-10-18 : un `nohup` qui survivrait au job et laisserait
+l'hôte bloqué jusqu'à un `rm`. Elle ne se pose pas.
 
 ## Pourquoi un seul Deploy à la fois sur le compte `deploy`
 
@@ -50,12 +44,25 @@ dans le workflow : pas de redémarrage d’api-server.
 
 ## Couverture
 
-Workflows réutilisables `deploy-infomaniak.yml` et `deploy-vite-standalone.yml`.
+Workflow réutilisable `deploy-infomaniak.yml`. Il publie le contenu
+(`releases/` et `current`). Il n'envoie pas le vhost nginx, le `.env`, ni `robots.txt`.
 Un rsync lancé à la main sur le même compte passe à côté du verrou, même si le
 dépôt a un `deploy.yml`. `FR-monjardiniersuisse.ch` et `FR-monexterminateursuisse.ch`
 prennent déjà ce verrou dans leur propre workflow. `DE-schaedlinge-schweiz.ch` et
 `FR-nuisibles-suisse.ch` publient par `deploy/deployer.sh`. `FR-domisane-suisse.ch`
-et `DE-hausana-schweiz.ch` n’ont pas de script de publication dans le dépôt.
+et `DE-hausana-schweiz.ch` n'ont pas de script de publication dans le dépôt.
+
+Les trois qui vont recevoir un workflow (domisane, hausana, schaedlinge-schweiz)
+ne sont pas des workspaces pnpm : ils ne peuvent pas appeler `deploy-infomaniak.yml`.
+Leur `deploy.yml` reprend le schéma monjardinier : `prendre.sh` avant le rsync,
+`relacher.sh` ensuite, même répertoire de verrou, utilisateur `deploy`, checkout
+de `ops/verrou-hote` sur `@v1`. Même exclusion : contenu seulement.
+
+`helvetic-deploy-ci-v2` n'est pas dans `authorized_keys` de `deploy` sur Netcup
+(`159.195.149.181`). Tant que cette clé publique n'y est pas, les workflows de
+hausana et schaedlinge-schweiz ne peuvent pas se connecter. La poser, c'est ajouter
+la publique (empreinte dans `docs/INVENTAIRE-CLE-CI-V2.md`) à ce fichier, pas la
+privée. Ce n'est pas fait ici.
 
 ## Relâche
 

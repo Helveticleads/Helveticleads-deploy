@@ -10,8 +10,7 @@
 Les appelants référencent `…/deploy-*.yml@v1` (et `verifier-cibles.yml@v1` le cas échéant).
 Ils ne pointent **jamais** sur `v1.N.0` ni sur `main`.
 
-Un tag couvre **tout** le dépôt : `deploy-infomaniak`, `deploy-vite-standalone`,
-`verifier-cibles` — même SHA.
+Un tag couvre **tout** le dépôt : `deploy-infomaniak`, `verifier-cibles` — même SHA.
 
 ## Protection du tag `v1*`
 

@@ -176,8 +176,25 @@ jobs:
           exit "$rc"
 
       - name: Deploiement atomique gaté
+        env:
+          LOCK_OWNER: ${{ github.repository }}@${{ github.run_id }}
         run: |
           set -euo pipefail
+          # Battement : session ssh tenue par ce step, sans nohup.
+          # La fin du step ou la mort du runner coupe ssh ; SIGHUP tue la boucle.
+          HB_PID=""
+          stop_hb() {
+            if [ -n "${HB_PID:-}" ]; then
+              kill "$HB_PID" 2>/dev/null || true
+              wait "$HB_PID" 2>/dev/null || true
+              HB_PID=""
+            fi
+          }
+          if [ "${{ steps.verrou.outputs.held }}" = "1" ]; then
+            ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes               "deploy@${HOST}"               "env LOCK_OWNER=$(printf %q "$LOCK_OWNER") bash -s"               < "_verrou_hote/ops/verrou-hote/battement.sh" &
+            HB_PID=$!
+          fi
+          trap stop_hb EXIT
           TS=$(date +%Y%m%d-%H%M%S)
           BASE="/var/www/$DOMAIN"
           SSH_OPTS=(-i ~/.ssh/id_ed25519)
@@ -214,7 +231,7 @@ jobs:
           # vérifiée vers une cible du bâti. Mesure, pas checklist.
           # Vérifié AVANT d'écrire. Ensemble vide ≠ feu vert.
           SERVI=$(mktemp); BATI=$(mktemp); CAND=$(mktemp)
-          trap 'rm -f "$SERVI" "$BATI" "$CAND"' EXIT
+          trap 'rm -f "$SERVI" "$BATI" "$CAND"; stop_hb' EXIT
           if ! "${SSH_CMD[@]}" \
             "cd '$BASE/current' && find -L . -name index.html | sed 's|^\\./||;s|/index.html\$||;s|^index.html\$|/|' | LC_ALL=C sort" \
             > "$SERVI" 2>/dev/null; then
