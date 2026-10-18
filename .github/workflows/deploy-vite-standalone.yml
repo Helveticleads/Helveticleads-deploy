@@ -62,6 +62,15 @@ jobs:
           NODE_ENV: production
         run: ${{ inputs.build_command }}
 
+      - name: Scripts gates build
+        uses: actions/checkout@v4
+        with:
+          repository: Helveticleads/Helveticleads-deploy
+          path: _deploy_gates
+          sparse-checkout: |
+            ops/deploy-gates
+          sparse-checkout-cone-mode: false
+
       - name: Gates build-time
         run: |
           set -euo pipefail
@@ -70,6 +79,11 @@ jobs:
           echo "SRC=$SRC" >> "$GITHUB_ENV"
 
           test -f "$SRC/index.html" || { echo "GATE_FAIL build:index_html_absent"; exit 1; }
+
+          # noindex sur LA RACINE seulement — avant rsync. Pas de drapeau de contournement.
+          GARDE="_deploy_gates/ops/deploy-gates/garde-noindex-racine.sh"
+          test -f "$GARDE"
+          bash "$GARDE" "$SRC"
 
           for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' "$SRC/index.html" | sort -u); do
             test -f "$SRC$r" || { echo "GATE_FAIL build:asset_manquant:$r"; exit 1; }

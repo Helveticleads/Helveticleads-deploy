@@ -71,6 +71,15 @@ jobs:
           DOMAIN: ""
         run: pnpm --filter ${{ inputs.artifact }} run build
 
+      - name: Scripts gates build
+        uses: actions/checkout@v4
+        with:
+          repository: Helveticleads/Helveticleads-deploy
+          path: _deploy_gates
+          sparse-checkout: |
+            ops/deploy-gates
+          sparse-checkout-cone-mode: false
+
       - name: Gates build-time
         run: |
           set -euo pipefail
@@ -82,6 +91,11 @@ jobs:
 
           # 1) index.html present
           test -f "$SRC/index.html" || { echo "GATE_FAIL build:index_html_absent"; exit 1; }
+
+          # 1b) noindex sur LA RACINE seulement — avant rsync/verrou. Pas de drapeau de contournement.
+          GARDE="_deploy_gates/ops/deploy-gates/garde-noindex-racine.sh"
+          test -f "$GARDE"
+          bash "$GARDE" "$SRC"
 
           # 2) asset coherence: each /assets/*.js|css referenced exists locally
           for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' "$SRC/index.html" | sort -u); do
