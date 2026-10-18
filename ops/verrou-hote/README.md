@@ -30,10 +30,17 @@ Défaut **`STALE_SEC=3600` (60 min)**.
 Pas de heartbeat. Décision, pas dette.
 
 Un holder vivant dont `taken_at` dépasse 60 min peut être repris (`LOCK_STALE_RECLAIM`).
-Les Deploy durent quelques minutes, le seuil est loin. Fermer le trou rafraîchirait
-`taken_at` en arrière-plan (~15 lignes) ; si `relacher` ne tourne pas, l’hôte resterait
-bloqué jusqu’à `rm -rf $HOME/.helveticleads-deploy-lock`. Un hôte bloqué un dimanche
+Les Deploy durent quelques minutes, le seuil est loin. Un hôte bloqué un dimanche
 soir coûte plus cher que le risque couvert.
+
+Fermer le trou sans bloquer l’hôte : le rafraîchissement de `taken_at` doit mourir
+avec le job. Une session `ssh` tenue par le runner, sans `nohup`, réécrit `taken_at`
+tant que le déploiement tourne. Si le runner meurt, la session tombe, la boucle
+reçoit SIGHUP, `taken_at` cesse, et `STALE` reprend le verrou au bout de 60 min.
+`relacher.sh` retire le répertoire tout de suite quand le job se termine.
+Ce qui bloquerait l’hôte jusqu’à un `rm` : un `nohup` ou un `disown`, qui
+continuerait à rafraîchir après la mort du job. C’est exclu. Coût non posé :
+une session ssh ouverte le temps du rsync, une dizaine de lignes.
 
 ## Pourquoi un seul Deploy à la fois sur le compte `deploy`
 
