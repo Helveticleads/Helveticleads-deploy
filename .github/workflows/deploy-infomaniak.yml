@@ -61,6 +61,28 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Garde sitemap déclarée dans le build
+        run: |
+          set -euo pipefail
+          PKG_DIR="$(pnpm --filter "$ARTIFACT" exec node -e 'process.stdout.write(process.cwd())')"
+          LIFECYCLE="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const pkg = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            const scripts = pkg.scripts || {};
+            const parts = ["prebuild", "build", "postbuild"].map((k) => scripts[k] || "");
+            process.stdout.write(parts.join("\n"));
+          ' "$PKG_DIR/package.json")"
+          if ! printf '%s' "$LIFECYCLE" | grep -q 'guard-sitemap-equality'; then
+            echo "GATE_FAIL build:garde_sitemap_absente"
+            echo "Le build de $ARTIFACT ne lance pas guard-sitemap-equality."
+            echo "pnpm run build enchaîne prebuild, build et postbuild. Aucun des trois ne contient ce nom."
+            echo "Scripts lus :"
+            printf '%s\n' "$LIFECYCLE" | sed 's/^/  /'
+            echo "Sans cette garde, un sitemap vide peut passer l'égalité 0=0 et être publié."
+            exit 1
+          fi
+          echo "GATE_OK garde_sitemap_declaree artifact=$ARTIFACT"
+
       - name: Build front prerendu
         env:
           PORT: "10000"
