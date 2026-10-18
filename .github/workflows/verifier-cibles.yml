@@ -30,7 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # La garde fait git show / ls-tree sur origin/main. Sans fetch-depth,
+      # checkout prend 1 : ce ref n'est là que si la branche testée est main.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Le coureur résout-il le DNS ?
         run: |
