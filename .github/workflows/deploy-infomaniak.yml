@@ -40,7 +40,12 @@ jobs:
       HOST: ${{ inputs.host }}
       SMOKE_PATH: ${{ inputs.smoke_path }}
     steps:
+      # Historique complet : generate-sitemap (et gardes voisines) dérivent lastmod /
+      # datation de git log. Sans fetch-depth, checkout prend 1 : une seule date pour
+      # tous les fichiers, et la garde refuse. Mesuré : +~0,4 s sur le plus gros dépôt.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
