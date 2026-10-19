@@ -7,6 +7,7 @@
  * Échappatoire documentation : une ligne contenant uniquement
  *   garde-marqueurs-ignore
  * (éventuellement dans un commentaire) saute le fichier entier.
+ * Chaque saut est annoncé (GATE_SKIP) — ce n’est pas GATE_OK.
  *
  * Usage: node guard-marqueurs-conflit.mjs [racine]
  */
@@ -47,21 +48,38 @@ function walk(dir, acc = []) {
   return acc;
 }
 
+function relOf(file) {
+  const r = relative(ROOT === "." ? process.cwd() : ROOT, file);
+  return r || file;
+}
+
 const hits = [];
-let ignored = 0;
+const skipped = [];
 for (const file of walk(ROOT)) {
   const text = readFileSync(file, "utf8");
   if (IGNORE_LINE.test(text)) {
-    ignored += 1;
+    skipped.push(relOf(file));
     continue;
   }
   if (HAS_LT.test(text) && HAS_EQ.test(text) && HAS_GT.test(text)) {
-    hits.push(relative(ROOT === "." ? process.cwd() : ROOT, file) || file);
+    hits.push(relOf(file));
   }
 }
+
+for (const f of skipped) {
+  console.log(`GATE_SKIP marqueurs-conflit:${f}`);
+}
+if (skipped.length) {
+  console.log(`GATE_SKIP marqueurs-conflit:count=${skipped.length}`);
+}
+
 if (hits.length) {
   console.error(`[marqueurs-conflit] ${hits.length} fichier(s)`);
   for (const f of hits) console.error(`  ${f}`);
   process.exit(1);
 }
-console.log(`[marqueurs-conflit] 0 dans ${ROOT}` + (ignored ? ` (ignorés=${ignored})` : ""));
+if (skipped.length) {
+  console.log(`[marqueurs-conflit] 0 conflit dans ${ROOT} (ignorés=${skipped.length} — voir GATE_SKIP)`);
+} else {
+  console.log(`[marqueurs-conflit] 0 dans ${ROOT}`);
+}

@@ -3,7 +3,7 @@
 Refuse un fichier qui contient **les trois** marqueurs `<<<<<<<` / `=======` / `>>>>>>>` en début de ligne.
 
 - Un titre setext Markdown (`=======` seul) **passe**.
-- Échappatoire documentation : une ligne `garde-marqueurs-ignore` (seule sur la ligne, éventuellement dans un commentaire) **ignore le fichier entier**.
+- Échappatoire documentation : une ligne `garde-marqueurs-ignore` (seule sur la ligne, éventuellement dans un commentaire) **ignore le fichier entier (annoncé GATE_SKIP, une ligne par fichier + count)**.
 
 Preuves : `./preuves.sh`
 
