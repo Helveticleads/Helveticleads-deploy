@@ -30,6 +30,10 @@ Trois relevés du 18 octobre avaient cette forme : les journaux nginx « lisible
 - Le défaut annoncé n'existait pas.
 - L'outil de ce passage n'a pas été rejoué ici. On ne le nomme pas de mémoire.
 
+## Gabarits de champ téléphone — pas une anomalie
+
+`079 123 45 67`, `079 000 00 00` et `+41 79 000 00 00` sont l'attribut `placeholder` des champs téléphone : le texte grisé qui montre un format et disparaît à la frappe. Personne ne peut les appeler. Confirmé côté DE et côté FR (MODIFS RESEAUX 1 et 2). La rangée de zéros n'apprend aucun format. Les sessions de parc uniformisent sur `079 123 45 67`. Un prochain relevé ne les ressort pas comme un numéro affiché.
+
 ## Douze numéros « affichés » que la plateforme ne connaît pas
 
 - Outil : expression régulière sur le HTML, le point compté comme séparateur de téléphone, `(?:[\s./-]?\d){7}`.

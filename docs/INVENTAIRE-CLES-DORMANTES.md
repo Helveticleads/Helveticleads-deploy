@@ -45,4 +45,14 @@ do
 done'
 ```
 
-Une ligne absente veut dire : aucune connexion acceptée avec cette empreinte dans les fichiers encore là. La rotation d'`auth.log` ne garde pas l'historique depuis le 16 septembre. La ligne, quand elle existe, porte l'heure et `from <adresse>`.
+`tail -1` sur la concaténation de `zgrep` prend la dernière ligne du dernier fichier, pas la dernière en date : `auth.log` est lu en premier. La dernière connexion est le maximum des horodatages.
+
+Relevé du 2026-10-19T02:26:22+0200, compte `deploy`, cinq fichiers `auth.log*` lus.
+
+| Clé | Acceptées gardées | Dernière | Depuis |
+|---|---|---|---|
+| `ci-deploy-demenagements` | 31 | 2026-10-17T15:33:41Z | 40.122.245.35 |
+| `deploy-helveticleads` | 31 | 2026-10-17T15:34:32Z | 128.85.45.65 |
+| `ci_deploy_ia` | 39 | 2026-10-17T17:23:28Z | 172.190.124.68 |
+
+Netcup, 2026-10-19T02:26:42+0200 : l'alias `netcup` est `root`, pas `deploy`. Il n'y a pas de fichier `/var/log/auth.log`. sshd écrit dans le journal systemd. Dans ce journal, l'empreinte `SHA256:/a9MJsa/laE6JE3RuEvlp4Im+I+8/yDWE3QjPuA4558` n'a aucune ligne `Accepted publickey`. L'empreinte `SHA256:IZ4/Frt87G8kg8SyuJskWXcfEuwM5fLVtwIgzDK/gb0` en a 362 ; la dernière est le 2026-08-26T19:14:56+0200, compte `deploy`, depuis 176.98.214.49.
