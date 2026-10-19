@@ -12,7 +12,9 @@ Ce que l'outil retourne (un nom de fichier, un compte, une correspondance) n'est
 
 ## Décision — pas de `Disallow` pour les robots IA
 
-Le parc reste lisible par les LLM et consultable par les outils qu'un prospect ou un acheteur peut interroger. Aucune session ne propose de `Disallow` GPTBot, ClaudeBot, PerplexityBot ou équivalent. La question ne revient pas à chaque relevé. Ce qui se mesure, c'est le coût (bande passante, place en journaux), pas une recommandation de blocage.
+Le parc reste lisible par les LLM et consultable par les outils qu'un prospect ou un acheteur peut interroger. Aucune session ne propose de `Disallow` GPTBot, ClaudeBot, PerplexityBot ou équivalent. La question ne revient pas. Ce qui se mesure, c'est le coût (bande passante, place en journaux), pas une recommandation de blocage.
+
+Mesure du 2026-10-19 (quatorze jours, quatre hôtes) : 9,6 % de la bande passante, 17 % des lignes de journal. L'écart — deux fois plus de lignes que de volume — est le profil d'un crawler qui frappe beaucoup d'URL pour peu d'octets (redirections, 404). Indice pour le jour où on lira les sitemaps. Pas une action aujourd'hui.
 
 ## Journaux nginx lisibles par `deploy`
 
