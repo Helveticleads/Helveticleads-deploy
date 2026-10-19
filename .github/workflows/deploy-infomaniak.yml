@@ -47,6 +47,22 @@ jobs:
         with:
           fetch-depth: 0
 
+
+      # Garde marqueurs conflit (trois marqueurs = conflit Git ; setext Markdown OK).
+      # Échappatoire doc : ligne « garde-marqueurs-ignore ». Ne prend effet pour les
+      # appelants @v1 qu'après promotion de v1 — volontairement hors de cette PR seule.
+      - name: Scripts garde marqueurs
+        uses: actions/checkout@v4
+        with:
+          repository: Helveticleads/Helveticleads-deploy
+          path: _garde_marqueurs
+          sparse-checkout: |
+            ops/garde-marqueurs-conflit
+          sparse-checkout-cone-mode: false
+
+      - name: Garde marqueurs conflit
+        run: node _garde_marqueurs/ops/garde-marqueurs-conflit/guard-marqueurs-conflit.mjs .
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
