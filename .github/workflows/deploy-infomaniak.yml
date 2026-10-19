@@ -71,11 +71,22 @@ jobs:
           DOMAIN: ""
         run: pnpm --filter ${{ inputs.artifact }} run build
 
+      - name: Ref garde sitemap (diagnostic)
+        run: |
+          echo "job.workflow_repository=${{ job.workflow_repository }}"
+          echo "job.workflow_sha=${{ job.workflow_sha }}"
+          echo "github.workflow_sha=${{ github.workflow_sha }}"
+          echo "github.repository=${{ github.repository }}"
+          echo "github.sha=${{ github.sha }}"
+
       - name: Script garde sitemap (effet)
         uses: actions/checkout@v4
         with:
-          repository: Helveticleads/Helveticleads-deploy
-          ref: ${{ github.workflow_sha }}
+          # job.workflow_* = dépôt/SHA du workflow RÉUTILISABLE, pas de l'appelant.
+          # github.workflow_sha dans un workflow_call rend le SHA de l'appelant
+          # (mesuré run 39195484929 : ref=19a20f86 = main de pro-nuisibles → not our ref).
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _garde_sitemap
           sparse-checkout: |
             ops/garde-sitemap
