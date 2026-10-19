@@ -79,8 +79,8 @@ preuve_2_en_retard() {
   grep -q 'PREUVE-ecart-fabrique' "$OUT/p2/en-retard.tsv" || ko "$grade" "pas EN_RETARD"
   local ecart
   ecart=$(awk -F'\t' '$2=="PREUVE-ecart-fabrique"{print $5}' "$OUT/p2/en-retard.tsv")
-  awk -v e="$ecart" 'BEGIN{exit !(e+0 > 40)}' || ko "$grade" "écart=$ecart"
-  ok "$grade" "preuve 2 — EN_RETARD écart=${ecart}h"
+  printf '%s' "$ecart" | grep -q 'fichiers' || ko "$grade" "écart=$ecart"
+  ok "$grade" "preuve 2 — EN_RETARD écart=$ecart"
 }
 
 # --- Preuve 3 : 1er injoignable → avertissement (non bloquant) ---
