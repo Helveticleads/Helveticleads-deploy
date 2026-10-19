@@ -1,19 +1,16 @@
 # Relevés 2026-10-19 — rendu générique et hors socle
-
 > Fichier de résidence. Les en-têtes de compte rendu se dérivent de ce fichier ;
 > ne pas retaper les chiffres ailleurs sans mettre à jour ici.
 
 ## En-tête (3 lignes)
-
-1. Rendu : `textLen ≥ 200` **et** `elements ≥ 20` (pas `#root`) — mesuré 8 sites live + 4 synthétiques ; shell Vite `#root` vide = faux positif.
+1. Rendu, repris de `ops/mesure-rendu/mesurer-rendu.mjs` : `textLen ≥ 200` **et** `elements ≥ 20` (scripts/styles exclus, pas de compte de mots, pas `#root`). Quatre cas `ops/mesure-rendu/preuves.sh` : `root-vide` FAIL, `squelette-sans-corps` FAIL, `page-saine-construite` OK, `vite-plomberie-servi` OK. Mesure d'où vient le seuil : 8 sites live + 4 synthétiques ; shell Vite `#root` vide = faux positif.
 2. Hors socle : **5** dépôts (schaedlinge sort dès mode non-workspace + garde rendu) ; ordre : monex → monjardinier → nuisibles → Domisane/Hausana.
 3. Mode schaedlinge : **pas** ressusciter `deploy-vite-standalone` ; assouplir `deploy-infomaniak.yml` (install/build/`output_dir`) — demi-journée **si** les gates `/assets` + `SITE_CONFIG` restent no-op sur Astro `_astro/` (mesuré : 0 `/assets/*` sur la home).
 
 ---
 
 ## 1. Mesure rendu (page servie)
-
-Critère tranché : **ET** (`textLen ≥ 200` et `elements ≥ 20`), scripts/styles exclus. Implémenté côté DEPLOY : `ops/mesure-rendu/mesurer-rendu.mjs`.
+Critère, repris du script (pas écrit à côté) : **ET** `textLen ≥ 200` et `elements ≥ 20`, scripts/styles exclus, pas de troisième conjoint « mots ». Quatre cas : `root-vide` FAIL, `squelette-sans-corps` FAIL, `page-saine-construite` OK, `vite-plomberie-servi` OK (`ops/mesure-rendu/preuves.sh`). Implémentation : `ops/mesure-rendu/mesurer-rendu.mjs`.
 
 | kind | `#root` | body_tags≈elements | text_chars | words | sample |
 | --- | --- | --- | --- | --- | --- |
@@ -35,7 +32,6 @@ Verdict : `#root` seul ne mesure pas le rendu (faux positif shell vide). Seuil E
 ---
 
 ## 2. Hors socle (parc FR/DE)
-
 | Classe | Dépôts | Motif restant |
 | --- | --- | --- |
 | CENTRAL `deploy-infomaniak@v1` | 54 | — |
@@ -57,9 +53,7 @@ Ordre de bascule : **monex → monjardinier** d’abord (Ecotox facturé / plus 
 ---
 
 ## 3. Mode non-workspace sur `deploy-infomaniak.yml` (schaedlinge)
-
 ### Ce que le workflow suppose aujourd’hui (workspace)
-
 | Étape | Hypothèse figée |
 | --- | --- |
 | input `artifact` | **required** — nom package pnpm `@workspace/…` |
@@ -67,12 +61,11 @@ Ordre de bascule : **monex → monjardinier** d’abord (Ecotox facturé / plus 
 | Install | `pnpm install --frozen-lockfile` (exige `pnpm-lock.yaml` + workspace) |
 | Build | `pnpm --filter ${artifact} run build` |
 | `SRC` | `$(pnpm --filter … cwd)/dist/public` |
-| Gate assets | boucle `/assets/*.(js|css)` dans `index.html` |
+| Gate assets | boucle `/assets/*.(js | css)` dans `index.html` |
 | Gate SITE_CONFIG | `grep` sous `$SRC/assets/` |
 | Preuve sabotage | chemin sous `dist/public` |
 
 ### Ce qu’est schaedlinge (mesuré)
-
 | Fait | Valeur |
 | --- | --- |
 | Lockfile | `package-lock.json` (npm) — **pas** de `pnpm-lock.yaml` |
@@ -84,7 +77,6 @@ Ordre de bascule : **monex → monjardinier** d’abord (Ecotox facturé / plus 
 | Hôte actuel | Netcup `159.195.149.181` (pas Infomaniak FR/DE typique) |
 
 ### Ce qui change pour le mode (paramètres, un seul workflow)
-
 1. `artifact` **optionnel** ; si vide → mode racine.
 2. Inputs ajoutés (ex.) : `package_manager` (`pnpm`\|`npm`), `build_command`, `output_dir` (défaut `dist/public` workspace / `dist` standalone).
 3. Install / build branchés sur ces inputs (54 appelants inchangés si défauts = comportement actuel).
@@ -92,7 +84,6 @@ Ordre de bascule : **monex → monjardinier** d’abord (Ecotox facturé / plus 
 5. Appelant schaedlinge : thin `workflow_call` + `host` / `domain` / `output_dir=dist` / `build_command=npm run build`.
 
 ### Coût
-
 - **Demi-journée** (≈ 3–4 h) : 1 PR Helveticleads-deploy (mode + défauts rétrocompatibles) + 1 PR DE-schaedlinge (appelant) + 1 deploy de preuve.
 - **Plus que demi-journée si** : la garde sitemap-par-effet refuse un `sitemap-index.xml` Astro sans `sitemap.xml` plat, ou si le docroot Netcup diverge du schéma `releases/current` attendu par l’anti-perte — alors +2–4 h de preuves ciblées, toujours sans second workflow.
 
@@ -101,7 +92,6 @@ Ne **pas** restaurer `deploy-vite-standalone.yml` (supprimé faute d’appelant 
 ---
 
 ## 4. Anti-marqueurs (état)
-
 Drafts ouverts, **GO fusion suspendu** (quatre nuisibles) :
 
 - Helveticleads-deploy `#34` — script + `GATE_SKIP` + step `deploy-infomaniak`
@@ -110,7 +100,6 @@ Drafts ouverts, **GO fusion suspendu** (quatre nuisibles) :
 ---
 
 ## 5. Dossiers clos (réf.)
-
 - Hausana : `pm2 delete`+`start` depuis `current`, deploy vert, HTTPS 200.
 - Domisane mémoire : plateau ~226–231 Mo / 10 min (pas une fuite).
 - Échappatoire marqueurs : `garde-marqueurs-ignore` + `GATE_SKIP` bruyant.
