@@ -140,12 +140,14 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H ${{ inputs.host }} >> ~/.ssh/known_hosts 2>/dev/null
 
-      # Scripts verrou : dépôt Helveticleads-deploy (pas le caller). Pas de heredoc YAML.
-      # Pas de token : ce dépôt est public et le checkout utilise le jeton par défaut. Un secret nommé ici n'est pas hérité par les 53 appelants et a figé leurs déploiements du 1er au 16 octobre 2026.
+      # Scripts verrou : même dépôt/SHA que le workflow réutilisable (pas le caller, pas main flottant).
+      # Pas de token : le dépôt doit rester public — un secret nommé ici n'est pas hérité par les
+      # appelants et a figé leurs déploiements du 1er au 16 octobre 2026.
       - name: Scripts verrou hôte
         uses: actions/checkout@v4
         with:
-          repository: Helveticleads/Helveticleads-deploy
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _verrou_hote
           sparse-checkout: |
             ops/verrou-hote
