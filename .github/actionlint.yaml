@@ -1,6 +1,10 @@
 # Bruit shellcheck SC2013 preexistant sur les scripts deploy (for x in $(cat ...)).
+# job.workflow_* : contexte réel des workflows réutilisables (mesuré), absent du
+# schéma actionlint 1.7.7 — ignorer jusqu'à mise à jour du binaire.
 # La garde utile reste la syntaxe YAML (#7).
 paths:
   .github/workflows/**/*.{yml,yaml}:
     ignore:
       - 'shellcheck reported issue in this script: SC2013:.+'
+      - 'property "workflow_repository" is not defined in object type .+'
+      - 'property "workflow_sha" is not defined in object type .+'

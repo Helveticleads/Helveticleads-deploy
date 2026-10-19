@@ -90,6 +90,7 @@ jobs:
           path: _garde_sitemap
           sparse-checkout: |
             ops/garde-sitemap
+            ops/mesure-rendu
           sparse-checkout-cone-mode: false
 
       - name: Gates build-time
@@ -102,11 +103,11 @@ jobs:
           echo "SRC=$SRC" >> "$GITHUB_ENV"
 
           # 1) index.html present
-          test -f "$SRC/index.html" || { echo "GATE_FAIL build:index_html_absent"; exit 1; }
+          test -s "$SRC/index.html" || { echo "GATE_FAIL build:index_html_absent_ou_vide"; exit 1; }
 
           # 2) asset coherence: each /assets/*.js|css referenced exists locally
           for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' "$SRC/index.html" | sort -u); do
-            test -f "$SRC$r" || { echo "GATE_FAIL build:asset_manquant:$r"; exit 1; }
+            test -s "$SRC$r" || { echo "GATE_FAIL build:asset_manquant_ou_vide:$r"; exit 1; }
           done
 
           # 3) anti bare-ref (SITE_CONFIG page blanche) — FORBIDDEN_BARE_REFS verbatim
@@ -151,6 +152,16 @@ jobs:
           path: _verrou_hote
           sparse-checkout: |
             ops/verrou-hote
+          sparse-checkout-cone-mode: false
+
+      - name: Scripts anti-perte
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: _anti_perte
+          sparse-checkout: |
+            ops/anti-perte
           sparse-checkout-cone-mode: false
 
       - name: Prendre verrou hôte
@@ -216,17 +227,10 @@ jobs:
           }
 
           rollback() {
-            if [ -n "${PREV:-}" ] && [ "$PREV" != "$BASE/current" ] && "${SSH_CMD[@]}" "test -d '$PREV'"; then
-              "${SSH_CMD[@]}" \
-                "ln -sfn '$PREV' '$BASE/.current.tmp' && mv -Tf '$BASE/.current.tmp' '$BASE/current'"
-              echo "ROLLBACK→$PREV"
-            elif "${SSH_CMD[@]}" "test -e '$BASE/current' -o -L '$BASE/current'" 2>/dev/null; then
-              # Première release (ou PREV invalide) : un 404 honnête vaut mieux qu'un current cassé.
-              "${SSH_CMD[@]}" "rm -f '$BASE/current'"
-              echo "ROLLBACK_VERS_NEANT: current retiré, site revenu à son état d'avant déploiement"
-            else
-              echo "ROLLBACK_SKIP: rien à retirer (current absent, PREV=${PREV:-∅})"
-            fi
+            # Même script que les preuves locales — exécuté sur l'hôte.
+            "${SSH_CMD[@]}" \
+              "env BASE=$(printf %q "$BASE") PREV=$(printf %q "${PREV:-}") bash -s" \
+              < "_anti_perte/ops/anti-perte/rollback.sh"
           }
 
           echo "Source build : $SRC"
@@ -239,15 +243,15 @@ jobs:
           PREV="$("${SSH_CMD[@]}" "readlink '$BASE/current'" 2>/dev/null || true)"
           echo "PREV=$PREV"
 
-          # Release complète = au moins un index.html sous releases/ (pas un rsync avorté).
+          # Lectures SSH → paramètres ; décision = ops/anti-perte/decider.sh
+          # Release complète = index.html non vide (placeholder nu ≠ servi).
           COMPLETE_RELEASE="$("${SSH_CMD[@]}" \
-            "find '$BASE/releases' -mindepth 2 -maxdepth 2 -name index.html 2>/dev/null | head -n1" || true)"
-          PARTIAL_RELEASES="$("${SSH_CMD[@]}" \
-            "ls -1d '$BASE/releases'/*/ 2>/dev/null | head -n5" || true)"
-
-          PREV_VALID=0
-          if [ -n "$PREV" ] && [ "$PREV" != "$BASE/current" ] && "${SSH_CMD[@]}" "test -d '$PREV'"; then
-            PREV_VALID=1
+            "find '$BASE/releases' -mindepth 2 -maxdepth 2 -name index.html -size +0 2>/dev/null | head -n1" || true)"
+          PREV_AVEC_PAGES=0
+          if [ -n "$PREV" ] && [ "$PREV" != "$BASE/current" ] \
+            && "${SSH_CMD[@]}" "test -d '$PREV'" \
+            && "${SSH_CMD[@]}" "find '$PREV' -maxdepth 2 -name index.html -size +0 2>/dev/null | grep -q ."; then
+            PREV_AVEC_PAGES=1
           fi
 
           ANTI_PERTE_STATUS=""
@@ -260,23 +264,21 @@ jobs:
             exit 1
           fi
 
-          if [ "$PREV_VALID" -eq 0 ]; then
-            if [ -n "$PREV" ]; then
-              echo "GATE_FAIL anti_perte:current_casse_sur_site_servi PREV=$PREV (cible absente)"
-              exit 1
-            fi
-            if [ -n "$COMPLETE_RELEASE" ]; then
-              echo "GATE_FAIL anti_perte:current_casse_sur_site_servi (release complete sans current: $COMPLETE_RELEASE)"
-              exit 1
-            fi
-            if [ -n "$PARTIAL_RELEASES" ]; then
-              echo "GATE_SKIP anti_perte:premiere_release (releases partielles sans index.html)"
-              echo " partiales: $PARTIAL_RELEASES"
-            else
-              echo "GATE_SKIP anti_perte:premiere_release"
-            fi
-            ANTI_PERTE_STATUS="GATE_SKIP anti_perte:premiere_release"
-          else
+          # exit 2 = continuer : capturer sans que set -e tue le job (APPEL-WORKFLOW.md).
+          set +e
+          DEC_OUT=$(PREV="$PREV" PREV_AVEC_PAGES="$PREV_AVEC_PAGES" \
+            COMPLETE_RELEASE="$COMPLETE_RELEASE" \
+            bash "_anti_perte/ops/anti-perte/decider.sh" 2>&1)
+          DEC_RC=$?
+          set -e
+          printf '%s\n' "$DEC_OUT"
+          if [ "$DEC_RC" -eq 0 ]; then
+            # premiere_release | hote_provisionne — même décision, diagnostic distinct
+            ANTI_PERTE_STATUS=$(printf '%s\n' "$DEC_OUT" | grep -E '^GATE_SKIP anti_perte:' | head -n1)
+            ANTI_PERTE_STATUS="${ANTI_PERTE_STATUS:-GATE_SKIP anti_perte:premiere_release}"
+          elif [ "$DEC_RC" -eq 1 ]; then
+            exit 1
+          elif [ "$DEC_RC" -eq 2 ]; then
             # ── Garde anti-perte (site déjà servi) ──
             # Aucune URL indexée servie ne doit disparaître SANS 301 HTTP
             # vérifiée vers une cible du bâti. Mesure, pas checklist.
@@ -404,6 +406,9 @@ jobs:
             fi
             echo "GATE_OK anti_perte servi=$NS bati=$NB perdues=0 migrees=$MIGREES"
             ANTI_PERTE_STATUS="GATE_OK anti_perte servi=$NS bati=$NB"
+          else
+            echo "GATE_FAIL anti_perte:decider_rc_inattendu:$DEC_RC"
+            exit 1
           fi
 
           retry rsync -avz --delete \
@@ -429,8 +434,14 @@ jobs:
           # HTTP éventuellement ancien, sinon GATE_FAIL sur un hash obsolète
           # absent de la nouvelle release (vu garten 2026-09-16, run 35055051643).
           code=$("${CURL_NOSTORE[@]}" -o /tmp/root.html -w '%{http_code}' "https://$DOMAIN$SMOKE_PATH" || echo 000)
-          if ! { [ "$code" = "200" ] && grep -q 'id="root"' /tmp/root.html; }; then
+          if [ "$code" != "200" ]; then
             echo "GATE_FAIL post:http_root:$code"
+            rollback
+            exit 1
+          fi
+          # Effet rendu (HTML servi) — textLen≥200 ET elements≥20 ; plus #root.
+          if ! node "$GITHUB_WORKSPACE/_garde_sitemap/ops/mesure-rendu/mesurer-rendu.mjs" /tmp/root.html; then
+            echo "GATE_FAIL post:rendu_insuffisant"
             rollback
             exit 1
           fi
@@ -484,17 +495,31 @@ jobs:
                   }
                 }
                 if (!nav) { console.error("PW_INFRA_NAV", "goto échoué après 3 tentatives"); await b.close(); process.exit(3); }
-                let mounted = false;
+                let ok = false;
                 try {
                   await p.waitForFunction(() => {
-                    const el = document.querySelector("#root");
-                    return !!el && (el.children.length > 0 || (el.textContent || "").trim().length > 50);
+                    const body = document.body;
+                    if (!body) return false;
+                    const clone = body.cloneNode(true);
+                    clone.querySelectorAll("script,style,noscript").forEach((n) => n.remove());
+                    const text = (clone.textContent || "").replace(/\s+/g, " ").trim();
+                    const elements = clone.querySelectorAll("*").length;
+                    return text.length >= 200 && elements >= 20;
                   }, { timeout: 20000 });
-                  mounted = true;
-                } catch (e) { mounted = false; }
+                  ok = true;
+                } catch (e) { ok = false; }
+                const m = await p.evaluate(() => {
+                  const body = document.body;
+                  if (!body) return { textLen: 0, elements: 0 };
+                  const clone = body.cloneNode(true);
+                  clone.querySelectorAll("script,style,noscript").forEach((n) => n.remove());
+                  const textLen = (clone.textContent || "").replace(/\s+/g, " ").trim().length;
+                  return { textLen, elements: clone.querySelectorAll("*").length };
+                });
+                console.log("PW_MESURE_RENDU textLen=" + m.textLen + " elements=" + m.elements);
                 await b.close();
                 if (errs.length) console.error("PW_PAGEERRORS", JSON.stringify(errs));
-                if (!mounted) { console.error("RENDER_BAD_MOUNT"); process.exit(2); }
+                if (!ok) { console.error("RENDER_INSUFFISANT"); process.exit(2); }
                 process.exit(0);
               })().catch(e => { console.error("PW_INFRA", String(e)); process.exit(3); });
             '
@@ -506,14 +531,15 @@ jobs:
             fi
           fi
           if [ -z "$render_ok" ]; then
-            for u in $(grep -oE '/[A-Za-z0-9._/-]*assets/[A-Za-z0-9._-]+\.js' /tmp/root.html | head -n3); do
-              if curl -fsS "https://$DOMAIN$u" | grep -Eq 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE'; then
-                echo "GATE_FAIL render_heuristic:bare_ref_live"
-                rollback
-                exit 1
-              fi
-            done
-            echo "GATE_OK render_heuristic"
+            # Repli : même critère sur le HTML déjà téléchargé (post_http_root).
+            if node "$GITHUB_WORKSPACE/_garde_sitemap/ops/mesure-rendu/mesurer-rendu.mjs" /tmp/root.html; then
+              echo "GATE_OK render_heuristic"
+              render_ok=1
+            else
+              echo "GATE_FAIL render_heuristic:rendu_insuffisant"
+              rollback
+              exit 1
+            fi
           fi
 
           # --- retention (5 releases) — only after all gates pass ---

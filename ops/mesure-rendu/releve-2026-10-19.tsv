@@ -1,0 +1,5 @@
+label	status	textLen	elements	hasRoot	notes
+vite-socle (helvetique-plomberie.ch/)	200	7934	917	True	HTML servi, scripts/styles exclus
+astro-schaedlinge (schaedlinge-schweiz.ch/)	200	7646	716	False	pas de #root — stack Astro
+next-domisane (domisane-suisse.ch/)	200	8155	670	False	pas de #root — stack Next
+casse-local-root-vide	file	0	2	True	<body><div id="root"></div> — passerait bare-ref + #root

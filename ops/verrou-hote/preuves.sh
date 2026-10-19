@@ -205,6 +205,21 @@ preuve_9_manuel() {
   ok "$grade" "preuve 9 — libération manuelle"
 }
 
+# --- Preuve 10 : présence LOCK_DIR ≠ validité taken_at ---
+preuve_10_taken_at_illisible() {
+  local grade=1 root="$OUT/p10"
+  rm -rf "$root"; mkdir -p "$root/lock"
+  echo "ghost@run" > "$root/lock/owner"
+  printf 'not-a-date\n' > "$root/lock/taken_at"
+  LOCK_DIR="$root/lock" LOCK_OWNER=reclaimer STALE_SEC=1500 WAIT_MAX_SEC=10 WAIT_POLL_SEC=1 \
+    bash "$DIR/prendre.sh" >"$OUT/p10.out" 2>"$OUT/p10.err" || true
+  grep -q 'LOCK_STALE_RECLAIM' "$OUT/p10.err" || ko "$grade" "reprise non journalisée"
+  grep -q 'temoin illisible' "$OUT/p10.err" || ko "$grade" "motif temoin illisible absent"
+  grep -q 'LOCK_HELD=1' "$OUT/p10.out" || ko "$grade" "pas de LOCK_HELD après reprise"
+  [ "$(cat "$root/lock/owner")" = "reclaimer" ] || ko "$grade" "owner non repris"
+  ok "$grade" "preuve 10 — LOCK_DIR + taken_at illisible ⇒ STALE reclaim"
+}
+
 echo "=== Preuves verrou par hôte ==="
 echo "Couverture : 40 sites / 4 hôtes via workflow réutilisable. 16 rsync manuels NON couverts."
 preuve_1_atomique
@@ -216,6 +231,7 @@ preuve_6_relache_echec
 preuve_7_pas_vol
 preuve_8_neutralise
 preuve_9_manuel
+preuve_10_taken_at_illisible
 
 echo
 echo "RESULT pass=$pass fail=$fail"
