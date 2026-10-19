@@ -19,7 +19,7 @@ jobs:
       - name: Checkout sparse ops/verrou-hote (sans token)
         uses: actions/checkout@v4
         with:
-          repository: Helveticleads/Helveticleads-deploy
+          repository: ${{ github.repository }}
           path: _verrou_hote
           sparse-checkout: |
             ops/verrou-hote

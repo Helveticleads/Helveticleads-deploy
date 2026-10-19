@@ -18,6 +18,27 @@ appelant. Toute preuve d'un câblage (checkout d'un script, secret hérité,
 ref résolue) doit venir d'un dépôt appelant réel, épinglé temporairement
 sur la ref sous test si besoin.
 
+## Checkout des scripts du dépôt deploy
+Dans un workflow réutilisable, tout `actions/checkout` qui tire un script de
+**ce** dépôt (`ops/verrou-hote`, `ops/garde-sitemap`, …) doit utiliser
+`job.workflow_repository` et `job.workflow_sha` — jamais le nom du propriétaire
+en dur, et jamais l'absence de `ref` (qui prendrait `main` flottant). Un
+appelant épinglé sur `@v1` doit exécuter la garde **et** le verrou du même SHA.
+Mesuré : sans `ref`, « Scripts verrou hôte » prenait `main` alors que
+`uses: …@v1` servait la garde de `v1`.
+
+`github.repository` / `github.sha` désignent l'appelant : les utiliser ici
+reproduit l'échec `not our ref` (run 39195484929).
+
+## Visibilité publique (contrainte de migration)
+Ce dépôt est **public** pour que les appelants checkoutent ses scripts avec le
+jeton par défaut, sans secret hérité. Le rendre privé dans une organisation
+casse les deux checkout (garde + verrou) chez tous les appelants, sauf à
+introduire un PAT/org secret hérité — ce qui a déjà figé le parc du 1er au 16
+octobre 2026. Options à trancher avant transfert : rester public, ou secret
+d'organisation hérité avec preuve depuis un appelant.
+
+
 
 Un tag couvre **tout** le dépôt : `deploy-infomaniak`, `verifier-cibles` — même SHA.
 
@@ -85,3 +106,10 @@ promotion, le parc a cessé de bouger — ce n’est pas un silence sain.
 
 - Ce n’est **pas** `@main` : `main` bouge à chaque fusion ; `v1` seulement par geste.
 - Ce n’est **pas** N PR site par promotion : une seule opération de tag.
+
+## Organisation cible (préparation)
+Nom tranché : `premium-helvetic-leads` (nom commercial, pas l'entité juridique).
+Ne rien transférer tant que les quatre sites nuisibles neufs ne servent pas leur
+contenu. Pilote hors prod : `FR-helvetique-ia.ch` ou `FR-helvetique-web.ch`,
+pas un des quatre. Ordre : pilote → préparer les `uses:` → transférer
+`Helveticleads-deploy` → fusionner les `uses:` → reste du parc.
