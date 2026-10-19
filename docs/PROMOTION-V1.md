@@ -10,6 +10,15 @@
 Les appelants référencent `…/deploy-*.yml@v1` (et `verifier-cibles.yml@v1` le cas échéant).
 Ils ne pointent **jamais** sur `v1.N.0` ni sur `main`.
 
+## Preuve d'un workflow réutilisable
+Un workflow réutilisable **ne se teste pas chez lui**. Les variables de
+contexte (`github.workflow_sha` vs `job.workflow_sha`, dépôt courant, etc.)
+n'ont pas la même valeur selon qu'il tourne pour lui-même ou pour un
+appelant. Toute preuve d'un câblage (checkout d'un script, secret hérité,
+ref résolue) doit venir d'un dépôt appelant réel, épinglé temporairement
+sur la ref sous test si besoin.
+
+
 Un tag couvre **tout** le dépôt : `deploy-infomaniak`, `verifier-cibles` — même SHA.
 
 ## Protection du tag `v1*`
