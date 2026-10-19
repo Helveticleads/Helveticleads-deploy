@@ -63,14 +63,17 @@ try_acquire() {
 reclaim_if_stale() {
   local taken age owner
   taken=$(read_taken_epoch)
+  owner=$(read_owner)
+  # Présence du dossier ≠ validité du témoin : taken_at absent/illisible → reprise.
   if [ "$taken" = "0" ]; then
-    return 1
+    log "LOCK_STALE_RECLAIM owner=$owner taken_at=$(read_taken) (temoin illisible) — reprise bruyante"
+    rm -rf "$LOCK_DIR"
+    return 0
   fi
   age=$(( $(now_epoch) - taken ))
   if [ "$age" -le "$STALE_SEC" ]; then
     return 1
   fi
-  owner=$(read_owner)
   log "LOCK_STALE_RECLAIM owner=$owner taken_at=$(read_taken) age_sec=$age stale_sec=$STALE_SEC — reprise bruyante"
   rm -rf "$LOCK_DIR"
   return 0

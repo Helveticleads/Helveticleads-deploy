@@ -1,0 +1,30 @@
+# Suite permanente anti-perte (arbres locaux — pas d'hôte).
+name: anti-perte-preuves
+
+on:
+  pull_request:
+    paths:
+      - "ops/anti-perte/**"
+      - ".github/workflows/deploy-infomaniak.yml"
+      - ".github/workflows/anti-perte-preuves.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ops/anti-perte/**"
+      - ".github/workflows/deploy-infomaniak.yml"
+      - ".github/workflows/anti-perte-preuves.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  preuves:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Suite anti-perte (8 cas + libellé retiré)
+        run: |
+          set -euo pipefail
+          chmod +x ops/anti-perte/*.sh
+          bash ops/anti-perte/preuves.sh

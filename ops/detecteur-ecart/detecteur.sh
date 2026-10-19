@@ -283,10 +283,13 @@ observer_servi() {
 }
 
 charger_empreintes_precedentes() {
-  if [ -n "${DETECTEUR_EMPREINTES_PREV:-}" ] && [ -f "$DETECTEUR_EMPREINTES_PREV" ]; then
+  if [ -n "${DETECTEUR_EMPREINTES_PREV:-}" ] && [ -s "$DETECTEUR_EMPREINTES_PREV" ]; then
     cp "$DETECTEUR_EMPREINTES_PREV" "$PREV_EMP_FILE"
     log "Empreintes précédentes depuis fichier ($DETECTEUR_EMPREINTES_PREV)"
     return
+  fi
+  if [ -n "${DETECTEUR_EMPREINTES_PREV:-}" ] && [ -e "$DETECTEUR_EMPREINTES_PREV" ]; then
+    log "Empreintes PREV présentes mais vides — ignorées (présence ≠ validité)"
   fi
   if [ "${DETECTEUR_DRY_RUN:-0}" = "1" ]; then
     log "Dry-run sans PREV injecté — première observation pour suivi empreinte"
@@ -307,10 +310,13 @@ charger_empreintes_precedentes() {
 }
 
 charger_injoignables_precedents() {
-  if [ -n "${DETECTEUR_INJOIGNABLE_PREV:-}" ] && [ -f "$DETECTEUR_INJOIGNABLE_PREV" ]; then
+  if [ -n "${DETECTEUR_INJOIGNABLE_PREV:-}" ] && [ -s "$DETECTEUR_INJOIGNABLE_PREV" ]; then
     cp "$DETECTEUR_INJOIGNABLE_PREV" "$PREV_INJ_FILE"
     log "Injoignables précédents depuis fichier ($DETECTEUR_INJOIGNABLE_PREV)"
     return
+  fi
+  if [ -n "${DETECTEUR_INJOIGNABLE_PREV:-}" ] && [ -e "$DETECTEUR_INJOIGNABLE_PREV" ]; then
+    log "Injoignables PREV présents mais vides — ignorés (présence ≠ validité)"
   fi
   if [ "${DETECTEUR_DRY_RUN:-0}" = "1" ]; then
     log "Dry-run sans PREV injoignable injecté — premier échec = avertissement"
