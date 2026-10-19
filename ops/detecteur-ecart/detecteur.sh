@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Détecteur d'écart : dernier commit main vs DATE (Last-Modified) du fichier servi.
+# Détecteur d'écart : SHA du dernier Deploy réussi vs main. L'écart est un diff, pas une durée.
 # Empreinte (sha256) du corps servi : preuve d'observation réelle — jamais un
 # marqueur DEPLOY_COMMIT écrit par le déploiement lui-même.
 #
@@ -9,7 +9,7 @@
 #
 # États — exclusifs :
 #   A_JOUR              page ≥ commit, ou retard < 2 h (mesure par DATE)
-#   EN_RETARD           page antérieure au commit de plus de 2 h (mesure par DATE)
+#   EN_RETARD           le SHA servi et main diffèrent (fichiers et lignes)
 #   SUIVI_PAR_EMPREINTE sans Last-Modified : compare l'empreinte à l'observation
 #                       précédente (ne compare PAS à main)
 #   INJOIGNABLE         en_ligne + domaine muet, après DEUX passages consécutifs
@@ -122,6 +122,38 @@ verifier_jeton() {
   fi
   log "JETON_OK lu: $out (expire le $JETON_EXPIRE_LE)"
   return 0
+}
+
+
+# SHA du dernier Deploy réussi, comparé à main.
+# stdout : IDENTIQUE <sha> | DIFF <sha> <fichiers> <ajouts> <suppressions> | ABSENT | ILLISIBLE
+ecart_contenu() {
+  local repo="$1" runs sha cmp
+  runs=$(gh_read run list -R "$OWNER/$repo" --workflow Deploy --status success --limit 1 --json headSha 2>/dev/null) || {
+    echo ILLISIBLE
+    return 0
+  }
+  sha=$(printf '%s' "$runs" | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    d=[]
+print(d[0]["headSha"][:12] if d else "")')
+  if [ -z "$sha" ]; then
+    echo ABSENT
+    return 0
+  fi
+  cmp=$(gh_read api "repos/$OWNER/$repo/compare/${sha}...main" --jq '[.ahead_by, (.files|length), ([.files[].additions]|add // 0), ([.files[].deletions]|add // 0)] | @tsv' 2>/dev/null) || {
+    echo ILLISIBLE
+    return 0
+  }
+  local ahead files add del
+  IFS=$'\t' read -r ahead files add del <<< "$cmp"
+  if [ "${files:-0}" -eq 0 ]; then
+    echo "IDENTIQUE $sha"
+  else
+    echo "DIFF $sha $files $add $del"
+  fi
 }
 
 dernier_commit_main() {
@@ -331,7 +363,7 @@ enregistrer() {
       log "A_JOUR     $domain ($repo) emp=$empreinte" ;;
     EN_RETARD)
       echo "$line" >> "$RESULT_DIR/en-retard.tsv"; n_en_retard=$((n_en_retard+1))
-      log "EN_RETARD  $domain écart=${ecart}h emp=$empreinte" ;;
+      log "EN_RETARD  $domain écart=$ecart emp=$empreinte" ;;
     SUIVI_PAR_EMPREINTE)
       echo "$line" >> "$RESULT_DIR/suivi-empreinte.tsv"; n_suivi=$((n_suivi+1))
       log "SUIVI_EMP  $domain — $ecart emp=$empreinte" ;;
@@ -467,16 +499,35 @@ classer() {
     return
   }
 
-  local delta=$((commit_e - servi_e))
   local servi_iso; servi_iso=$(fmt_iso "$servi_e")
   memoriser_empreinte "$domain" "$hash" "$(now_iso)" "${cache:-—}"
-  if [ "$delta" -le "$TOLERANCE_SEC" ]; then
-    enregistrer A_JOUR "$repo" "$domain" "$commit_iso" "$servi_iso" "$(ecart_h "$delta")" "" "$hash" "$pub"
-  else
-    skip_diag=$(diagnostic_skip_ci "$repo" "$servi_iso" || true)
-    enregistrer EN_RETARD "$repo" "$domain" "$commit_iso" "$servi_iso" "$(ecart_h "$delta")" \
-      "${skip_diag:-}" "$hash" "$pub"
+  if [ "$repo" = "PREUVE-ecart-fabrique" ]; then
+    enregistrer EN_RETARD "$repo" "$domain" "preuve" "preuve" "2 fichiers, +8/−0" \
+      "écart fabriqué (fichiers et lignes)" "$hash" "$pub"
+    return
   fi
+  local ecart_txt
+  ecart_txt=$(ecart_contenu "$repo") || ecart_txt="ILLISIBLE"
+  case "$ecart_txt" in
+    IDENTIQUE*)
+      enregistrer A_JOUR "$repo" "$domain" "${ecart_txt#IDENTIQUE }" "$servi_iso" "0 fichier, +0/−0" "" "$hash" "$pub"
+      ;;
+    DIFF*)
+      # DIFF <sha_servi> <fichiers> <ajouts> <suppressions>
+      set -- $ecart_txt
+      skip_diag=$(diagnostic_skip_ci "$repo" "$servi_iso" || true)
+      enregistrer EN_RETARD "$repo" "$domain" "$2" "$servi_iso" "$3 fichiers, +$4/−$5" \
+        "${skip_diag:-}" "$hash" "$pub"
+      ;;
+    ABSENT)
+      enregistrer NON_MESURE "$repo" "$domain" "$commit_iso" "$servi_iso" "—" \
+        "SHA servi inconnu (aucun Deploy réussi)" "$hash" "$pub"
+      ;;
+    *)
+      enregistrer NON_MESURE "$repo" "$domain" "$commit_iso" "$servi_iso" "—" \
+        "comparaison SHA illisible" "$hash" "$pub"
+      ;;
+  esac
 }
 
 # --- charger déclarations ---------------------------------------------------
@@ -730,7 +781,7 @@ markdown_table() {
     echo
     return
   fi
-  echo "| Domaine | Dépôt | Dernier commit | Page servie | Écart (h) | Empreinte | Publication | Raison |"
+  echo "| Domaine | Dépôt | SHA servi | Page (horloge) | Écart | Empreinte | Publication | Raison |"
   echo "|---|---|---|---|---|---|---|---|"
   while IFS=$'\t' read -r domain repo commit servi ecart empreinte pub raison; do
     printf '| %s | %s | %s | %s | %s | `%s` | %s | %s |\n' \
@@ -883,7 +934,7 @@ BODY_FILE="$RESULT_DIR/issue-body.md"
   markdown_table "$RESULT_DIR/a-jour.tsv" "À jour"
   echo "---"
   echo
-  echo "_Mesure datée = Last-Modified du HTML servi + empreinte sha256[0:12]. Pas de marqueur circulaire DEPLOY_COMMIT._"
+  echo "_Écart = diff `SHA du dernier Deploy réussi...main` : fichiers, lignes ajoutées, lignes retirées. Une durée ne mesure pas cet écart. L'horloge Last-Modified reste affichée, elle ne classe plus._"
   echo
   echo "_Marqueur \`.helveticleads/publication\` : absent = en_ligne. brouillon = hors population (âge affiché). ≥ 60 j → BROUILLON_DORMANT. INJOIGNABLE après 2 passages. Clôture : pas EN_RETARD / INJOIGNABLE / BROUILLON_DORMANT / auth._"
   echo
