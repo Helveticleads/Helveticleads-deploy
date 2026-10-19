@@ -5,7 +5,7 @@
 ## En-tête (3 lignes)
 1. Rendu, repris de `ops/mesure-rendu/mesurer-rendu.mjs` : `textLen ≥ 200` **et** `elements ≥ 20` (scripts/styles exclus, pas de compte de mots, pas `#root`). Quatre cas `ops/mesure-rendu/preuves.sh` : `root-vide` FAIL, `squelette-sans-corps` FAIL, `page-saine-construite` OK, `vite-plomberie-servi` OK. Mesure d'où vient le seuil : 8 sites live + 4 synthétiques ; shell Vite `#root` vide = faux positif.
 2. Hors socle : **5** dépôts (schaedlinge sort dès mode non-workspace + garde rendu) ; ordre : monex → monjardinier → nuisibles → Domisane/Hausana.
-3. Mode schaedlinge : **pas** ressusciter `deploy-vite-standalone` ; assouplir `deploy-infomaniak.yml` (install/build/`output_dir`) — demi-journée **si** les gates `/assets` + `SITE_CONFIG` restent no-op sur Astro `_astro/` (mesuré : 0 `/assets/*` sur la home).
+3. Mode schaedlinge : **pas** ressusciter `deploy-vite-standalone`. Sur `main` la gate `/assets` écrit `GATE_SKIP assets:arbre_non_couvert:/_astro/` quand la home ne référence que `/_astro/` — plus un `GATE_OK` qui n'a rien ouvert. `SITE_CONFIG` ne lit toujours que `$SRC/assets/`. Coût inchangé : **½ j + 2–4 h**, sauf `sitemap.xml` plat dans le dist **et** docroot Netcup déjà `releases/current` (non relu).
 
 ---
 
