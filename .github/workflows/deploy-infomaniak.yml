@@ -90,6 +90,7 @@ jobs:
           path: _garde_sitemap
           sparse-checkout: |
             ops/garde-sitemap
+            ops/garde-assets
             ops/mesure-rendu
           sparse-checkout-cone-mode: false
 
@@ -105,10 +106,12 @@ jobs:
           # 1) index.html present
           test -s "$SRC/index.html" || { echo "GATE_FAIL build:index_html_absent_ou_vide"; exit 1; }
 
-          # 2) asset coherence: each /assets/*.js|css referenced exists locally
-          for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' "$SRC/index.html" | sort -u); do
-            test -s "$SRC$r" || { echo "GATE_FAIL build:asset_manquant_ou_vide:$r"; exit 1; }
-          done
+          # 2) actifs : /assets/ lu ; /_astro/ = GATE_SKIP nommé (pas un OK aveugle)
+          tok=$(bash "$GITHUB_WORKSPACE/_garde_sitemap/ops/garde-assets/classer-refs.sh" --local "$SRC/index.html" "$SRC")
+          echo "$tok"
+          case "$tok" in
+            GATE_FAIL*) exit 1 ;;
+          esac
 
           # 3) anti bare-ref (SITE_CONFIG page blanche) — FORBIDDEN_BARE_REFS verbatim
           if grep -REl 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE' "$SRC/assets/" 2>/dev/null; then
@@ -447,20 +450,36 @@ jobs:
           fi
           echo "GATE_OK post_http_root"
 
-          for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' "$SRC/index.html" | sort -u); do
-            ac=000
-            for attempt in 1 2 3; do
-              ac=$("${CURL_NOSTORE[@]}" -o /dev/null -w '%{http_code}' "https://$DOMAIN$r" || echo 000)
-              [ "$ac" = "200" ] && break
-              sleep $((attempt * 2))
-            done
-            if [ "$ac" != "200" ]; then
-              echo "GATE_FAIL post:asset:$r:$ac"
+          tok=$(bash "$GITHUB_WORKSPACE/_garde_sitemap/ops/garde-assets/classer-refs.sh" --prefixe "$SRC/index.html")
+          echo "$tok"
+          case "$tok" in
+            GATE_SKIP*)
+              ;;
+            GATE_OK\ assets:aucune_reference*)
+              echo "GATE_OK post_assets"
+              ;;
+            GATE_OK\ assets:prefixe_assets*)
+              for r in $(grep -oE '/assets/[A-Za-z0-9._-]+\.(js|css)' "$SRC/index.html" | sort -u); do
+                ac=000
+                for attempt in 1 2 3; do
+                  ac=$("${CURL_NOSTORE[@]}" -o /dev/null -w '%{http_code}' "https://$DOMAIN$r" || echo 000)
+                  [ "$ac" = "200" ] && break
+                  sleep $((attempt * 2))
+                done
+                if [ "$ac" != "200" ]; then
+                  echo "GATE_FAIL post:asset:$r:$ac"
+                  rollback
+                  exit 1
+                fi
+              done
+              echo "GATE_OK post_assets"
+              ;;
+            *)
+              echo "GATE_PANNE assets:verdict_inattendu"
               rollback
-              exit 1
-            fi
-          done
-          echo "GATE_OK post_assets"
+              exit 2
+              ;;
+          esac
 
           # --- Gate rendu : Playwright (install ISOLÉ /tmp, hors workspace pnpm), heuristique en repli ---
           render_ok=""

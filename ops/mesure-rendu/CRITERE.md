@@ -12,6 +12,8 @@ La page a rendu si, sur le corps (scripts/styles exclus) :
 
 - `textLen ≥ 200` **et** `elements ≥ 20`
 
+Quatre cas, `ops/mesure-rendu/preuves.sh` : `root-vide` FAIL, `squelette-sans-corps` FAIL, `page-saine-construite` OK, `vite-plomberie-servi` OK. Pas de compte de mots.
+
 `ET`, pas `OU` : un squelette (nav/pied) sans contenu aurait assez d’éléments et trop peu de texte — `OU` le laisserait passer.
 
 Marge : la page saine la plus maigre mesurée fait 7 646 caractères (≈ 38× le seuil texte).

@@ -19,6 +19,8 @@ Appel sous `set -e`, codes 0/1/2, périmètre du branchement : `APPEL-WORKFLOW.m
 2. **Au moins une release avec page, mais PREV n’en sert aucune** → `GATE_FAIL anti_perte:current_casse_sur_site_servi`
 3. **PREV pointe une release avec pages** → comparaison servi ↔ bâti (`exit 2`)
 
+L'acceptation de cette échelle ne s'écrit pas `GATE_OK anti_perte`. Branche 3 : `decider.sh` écrit `ANTI_PERTE_ETAT=prev_valide` ; `preuves.sh` le nomme `PREV_VALIDE` (cas `prev_avec_pages`). Qui cherche `GATE_OK anti_perte` dans cette suite ne le trouvera pas. `GATE_OK anti_perte` est le jeton du workflow **après** la comparaison servi ↔ bâti, une fois `PREV_VALIDE` déjà acquis.
+
 Relevé hôtes du 2026-10-19 : `releve-hotes-2026-10-19.md`.
 
 ## Libellés retirés = témoins d'ancienneté
