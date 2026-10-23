@@ -31,6 +31,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -97,6 +101,8 @@ jobs:
       - name: Gates build-time
         run: |
           set -euo pipefail
+          VERDICT_FILE="${RUNNER_TEMP:-/tmp}/deploy-verdict.txt"
+          gate_fail() { local msg="GATE_FAIL $*"; echo "$msg"; printf '%s\n' "$msg" >> "$VERDICT_FILE"; }
           PKG_DIR="$(pnpm --filter "$ARTIFACT" exec node -e 'process.stdout.write(process.cwd())')"
           SRC="$PKG_DIR/dist/public"
           echo "SRC=$SRC"
@@ -104,18 +110,18 @@ jobs:
           echo "SRC=$SRC" >> "$GITHUB_ENV"
 
           # 1) index.html present
-          test -s "$SRC/index.html" || { echo "GATE_FAIL build:index_html_absent_ou_vide"; exit 1; }
+          test -s "$SRC/index.html" || { gate_fail "build:index_html_absent_ou_vide"; exit 1; }
 
           # 2) actifs : /assets/ lu ; /_astro/ = GATE_SKIP nommé (pas un OK aveugle)
           tok=$(bash "$GITHUB_WORKSPACE/_garde_sitemap/ops/garde-assets/classer-refs.sh" --local "$SRC/index.html" "$SRC")
           echo "$tok"
           case "$tok" in
-            GATE_FAIL*) exit 1 ;;
+            GATE_FAIL*) printf '%s\n' "$tok" >> "$VERDICT_FILE"; exit 1 ;;
           esac
 
           # 3) anti bare-ref (SITE_CONFIG page blanche) — FORBIDDEN_BARE_REFS verbatim
           if grep -REl 'SITE_CONFIG\.name|SITE_CONFIG_DE\.name|children:SITE_CONFIG|children:SITE_CONFIG_DE' "$SRC/assets/" 2>/dev/null; then
-            echo "GATE_FAIL build:reference_nue_SITE_CONFIG"
+            gate_fail "build:reference_nue_SITE_CONFIG"
             exit 1
           fi
 
@@ -130,7 +136,7 @@ jobs:
             TARGET="$SRC/${{ inputs.preuve_sabotage_retire }}"
             echo "PREUVE_SABOTAGE retire=$TARGET"
             if [ ! -f "$TARGET" ]; then
-              echo "GATE_FAIL preuve_sabotage:fichier_absent:$TARGET"
+              gate_fail "preuve_sabotage:fichier_absent:$TARGET"
               exit 1
             fi
             rm -f "$TARGET"
@@ -155,6 +161,7 @@ jobs:
           path: _verrou_hote
           sparse-checkout: |
             ops/verrou-hote
+            ops/deploy-verdict
           sparse-checkout-cone-mode: false
 
       - name: Scripts anti-perte
@@ -198,6 +205,8 @@ jobs:
           LOCK_OWNER: ${{ github.repository }}@${{ github.run_id }}
         run: |
           set -euo pipefail
+          VERDICT_FILE="${RUNNER_TEMP:-/tmp}/deploy-verdict.txt"
+          gate_fail() { local msg="GATE_FAIL $*"; echo "$msg"; printf '%s\n' "$msg" >> "$VERDICT_FILE"; }
           # Battement : session ssh tenue par ce step, sans nohup.
           # La fin du step ou la mort du runner coupe ssh ; SIGHUP tue la boucle.
           HB_PID=""
@@ -239,7 +248,7 @@ jobs:
           echo "Source build : $SRC"
 
           if ! "${SSH_CMD[@]}" "true" 2>/dev/null; then
-            echo "GATE_FAIL anti_perte:hote_injoignable"
+            gate_fail "anti_perte:hote_injoignable"
             exit 1
           fi
 
@@ -263,7 +272,7 @@ jobs:
           (cd "$SRC" && find -L . -name index.html | sed 's|^\./||;s|/index.html$||;s|^index.html$|/|' | LC_ALL=C sort) > "$BATI"
           NB=$(grep -c . "$BATI" || true)
           if [ "$NB" -eq 0 ]; then
-            echo "GATE_FAIL anti_perte:bati=0 (build vide)"
+            gate_fail "anti_perte:bati=0 (build vide)"
             exit 1
           fi
 
@@ -288,12 +297,12 @@ jobs:
             if ! "${SSH_CMD[@]}" \
               "cd '$BASE/current' && find -L . -name index.html | sed 's|^\\./||;s|/index.html\$||;s|^index.html\$|/|' | LC_ALL=C sort" \
               > "$SERVI" 2>/dev/null; then
-              echo "GATE_FAIL anti_perte:current_absent"
+              gate_fail "anti_perte:current_absent"
               exit 1
             fi
             NS=$(grep -c . "$SERVI" || true)
             if [ "$NS" -eq 0 ]; then
-              echo "GATE_FAIL anti_perte:servi_vide"
+              gate_fail "anti_perte:servi_vide"
               exit 1
             fi
             comm -23 "$SERVI" "$BATI" > "$CAND"
@@ -404,13 +413,13 @@ jobs:
             done < "$CAND"
 
             if [ "$PERDUES" -gt 0 ]; then
-              echo "GATE_FAIL anti_perte:perdues=$PERDUES migrees=$MIGREES servi=$NS bati=$NB — déploiement refusé"
+              gate_fail "anti_perte:perdues=$PERDUES migrees=$MIGREES servi=$NS bati=$NB — déploiement refusé"
               exit 1
             fi
             echo "GATE_OK anti_perte servi=$NS bati=$NB perdues=0 migrees=$MIGREES"
             ANTI_PERTE_STATUS="GATE_OK anti_perte servi=$NS bati=$NB"
           else
-            echo "GATE_FAIL anti_perte:decider_rc_inattendu:$DEC_RC"
+            gate_fail "anti_perte:decider_rc_inattendu:$DEC_RC"
             exit 1
           fi
 
@@ -438,13 +447,13 @@ jobs:
           # absent de la nouvelle release (vu garten 2026-09-16, run 35055051643).
           code=$("${CURL_NOSTORE[@]}" -o /tmp/root.html -w '%{http_code}' "https://$DOMAIN$SMOKE_PATH" || echo 000)
           if [ "$code" != "200" ]; then
-            echo "GATE_FAIL post:http_root:$code"
+            gate_fail "post:http_root:$code"
             rollback
             exit 1
           fi
           # Effet rendu (HTML servi) — textLen≥200 ET elements≥20 ; plus #root.
           if ! node "$GITHUB_WORKSPACE/_garde_sitemap/ops/mesure-rendu/mesurer-rendu.mjs" /tmp/root.html; then
-            echo "GATE_FAIL post:rendu_insuffisant"
+            gate_fail "post:rendu_insuffisant"
             rollback
             exit 1
           fi
@@ -467,7 +476,7 @@ jobs:
                   sleep $((attempt * 2))
                 done
                 if [ "$ac" != "200" ]; then
-                  echo "GATE_FAIL post:asset:$r:$ac"
+                  gate_fail "post:asset:$r:$ac"
                   rollback
                   exit 1
                 fi
@@ -545,7 +554,7 @@ jobs:
             rc=$?
             set -e
             if   [ "$rc" = 0 ]; then echo "GATE_OK render_playwright"; render_ok=1
-            elif [ "$rc" = 2 ]; then echo "GATE_FAIL render_playwright:page"; rollback; exit 1
+            elif [ "$rc" = 2 ]; then gate_fail "render_playwright:page"; rollback; exit 1
             else                      echo "render: Playwright infra KO (rc=$rc) -> repli heuristique"
             fi
           fi
@@ -555,7 +564,7 @@ jobs:
               echo "GATE_OK render_heuristic"
               render_ok=1
             else
-              echo "GATE_FAIL render_heuristic:rendu_insuffisant"
+              gate_fail "render_heuristic:rendu_insuffisant"
               rollback
               exit 1
             fi
@@ -573,6 +582,36 @@ jobs:
           echo "GATE_OK post_assets"
           echo "GATE_OK render"
           echo "GATE_OK deploy_complete"
+
+
+      - name: Notifier echec deploy (issue persistante)
+        if: failure()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VERDICT_FILE: ${{ runner.temp }}/deploy-verdict.txt
+        run: |
+          set -euo pipefail
+          SCRIPT="_verrou_hote/ops/deploy-verdict/notifier-echec.sh"
+          test -f "$SCRIPT"
+          bash "_verrou_hote/ops/deploy-verdict/preuve-derive.sh" "$SCRIPT"
+          bash "$SCRIPT"
+
+      - name: Cloturer verdicts apres succes
+        if: success()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SCRIPT="_verrou_hote/ops/deploy-verdict/cloturer-succes.sh"
+          test -f "$SCRIPT"
+          bash "_verrou_hote/ops/deploy-verdict/preuve-derive.sh" "$SCRIPT"
+          bash "$SCRIPT"
 
       - name: Relâcher verrou hôte
         if: always() && steps.verrou.outputs.held == '1'
